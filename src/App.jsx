@@ -64,6 +64,43 @@ const LEADERSHIP_LABELS = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Google Maps -- calcul du temps de trajet (règle des 15 minutes)    */
+/* ------------------------------------------------------------------ */
+const GOOGLE_MAPS_KEY = "AIzaSyAVXR_SH01n033i6tpRnWsvSLv1I_iDlZE";
+const LIMITE_MINUTES_PROXIMITE = 15;
+
+let googleMapsLoadingPromise = null;
+function loadGoogleMaps() {
+  if (window.google && window.google.maps) return Promise.resolve();
+  if (googleMapsLoadingPromise) return googleMapsLoadingPromise;
+  googleMapsLoadingPromise = new Promise((resolve, reject) => {
+    const script = document.createElement("script");
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${GOOGLE_MAPS_KEY}`;
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Failed to load Google Maps"));
+    document.head.appendChild(script);
+  });
+  return googleMapsLoadingPromise;
+}
+
+async function getDrivingMinutes(originAddress, destAddress) {
+  await loadGoogleMaps();
+  return new Promise((resolve, reject) => {
+    const service = new window.google.maps.DistanceMatrixService();
+    service.getDistanceMatrix(
+      { origins: [originAddress], destinations: [destAddress], travelMode: window.google.maps.TravelMode.DRIVING },
+      (response, status) => {
+        if (status !== "OK") { reject(new Error(status)); return; }
+        const el = response.rows[0]?.elements[0];
+        if (!el || el.status !== "OK") { reject(new Error(el?.status || "No route found")); return; }
+        resolve(Math.round(el.duration.value / 60));
+      }
+    );
+  });
+}
+
+/* ------------------------------------------------------------------ */
 /* Petits blocs visuels                                               */
 /* ------------------------------------------------------------------ */
 function ZoneStamp({ code, muted }) {
@@ -342,6 +379,20 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast }) {
   });
   const [moveTarget, setMoveTarget] = useState("");
   const [busy, setBusy] = useState(false);
+  const [distanceInfo, setDistanceInfo] = useState(null); // { minutes } | { error } | null
+  const [distanceLoading, setDistanceLoading] = useState(false);
+
+  useEffect(() => {
+    if (!moveTarget || !m.address) { setDistanceInfo(null); return; }
+    const target = bethels.find((b) => b.bethel_id === moveTarget);
+    if (!target || !target.address) { setDistanceInfo(null); return; }
+    setDistanceLoading(true);
+    setDistanceInfo(null);
+    getDrivingMinutes(m.address, target.address)
+      .then((minutes) => setDistanceInfo({ minutes }))
+      .catch((e) => setDistanceInfo({ error: e.message }))
+      .finally(() => setDistanceLoading(false));
+  }, [moveTarget, m.address, bethels]);
 
   async function saveEdit() {
     setBusy(true);
@@ -440,9 +491,32 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast }) {
               <option key={b.bethel_id} value={b.bethel_id}>{b.hp_number} — {b.leader_name} ({b.zone_name})</option>
             ))}
           </select>
+
+          {distanceLoading && (
+            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "8px" }}>Checking travel time…</div>
+          )}
+          {distanceInfo?.minutes !== undefined && (
+            <div style={{
+              fontSize: "12px", marginBottom: "8px", padding: "7px 10px", borderRadius: "6px",
+              display: "flex", alignItems: "center", gap: "6px", fontWeight: 600,
+              background: distanceInfo.minutes <= LIMITE_MINUTES_PROXIMITE ? "rgba(31,92,78,0.10)" : "rgba(184,134,59,0.12)",
+              color: distanceInfo.minutes <= LIMITE_MINUTES_PROXIMITE ? "var(--teal)" : "var(--gold)",
+            }}>
+              🚗 {distanceInfo.minutes} min driving
+              {distanceInfo.minutes > LIMITE_MINUTES_PROXIMITE && (
+                <span style={{ fontWeight: 500 }}>— outside the {LIMITE_MINUTES_PROXIMITE}-minute rule</span>
+              )}
+            </div>
+          )}
+          {distanceInfo?.error && (
+            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "8px" }}>
+              Could not check travel time ({distanceInfo.error}).
+            </div>
+          )}
+
           <div style={{ display: "flex", gap: "8px" }}>
             <button disabled={busy || !moveTarget} onClick={doMove} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: moveTarget ? "var(--plum)" : "var(--border)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: moveTarget ? "pointer" : "not-allowed" }}>
-              {busy ? "Moving…" : "Move"}
+              {busy ? "Moving…" : distanceInfo?.minutes > LIMITE_MINUTES_PROXIMITE ? "Move anyway" : "Move"}
             </button>
             <button onClick={() => setMode(null)} style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
           </div>
