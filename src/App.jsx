@@ -2,6 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Home, Inbox, Users, BarChart3, MapPin, Search, Check, X,
   ChevronRight, Phone, AlertCircle, Sparkles, Plus, RefreshCw,
+  Edit2, ArrowRightLeft, Trash2,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -46,6 +47,14 @@ async function supaPatch(table, query, body) {
   });
   if (!res.ok) throw new Error(`PATCH ${table} failed: ${res.status} ${await res.text()}`);
   return res.json();
+}
+
+async function supaDelete(table, query) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+    method: "DELETE",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+  });
+  if (!res.ok) throw new Error(`DELETE ${table} failed: ${res.status} ${await res.text()}`);
 }
 
 const LEADERSHIP_LABELS = {
@@ -326,23 +335,196 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 /* ------------------------------------------------------------------ */
 /* Fenêtre : détail d'un Bethel, avec ses membres                     */
 /* ------------------------------------------------------------------ */
-function BethelDetailModal({ bethel, onClose }) {
+function MemberRow({ m, bethels, currentBethelId, onChanged, isLast }) {
+  const [mode, setMode] = useState(null); // null | 'edit' | 'move'
+  const [form, setForm] = useState({
+    phone: m.phone || "", address: m.address || "", postal_code: m.postal_code || "",
+  });
+  const [moveTarget, setMoveTarget] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function saveEdit() {
+    setBusy(true);
+    try {
+      await supaPatch("members", `member_id=eq.${m.member_id}`, form);
+      setMode(null);
+      onChanged();
+    } catch (e) { alert("Error: " + e.message); } finally { setBusy(false); }
+  }
+
+  async function doMove() {
+    if (!moveTarget) return;
+    setBusy(true);
+    try {
+      await supaPatch("members", `member_id=eq.${m.member_id}`, { bethel_id: moveTarget });
+      setMode(null);
+      onChanged();
+    } catch (e) { alert("Error: " + e.message); } finally { setBusy(false); }
+  }
+
+  async function doRemove() {
+    if (!window.confirm(`Remove ${m.first_name} ${m.last_name} from this Bethel?`)) return;
+    setBusy(true);
+    try {
+      await supaDelete("members", `member_id=eq.${m.member_id}`);
+      onChanged();
+    } catch (e) { alert("Error: " + e.message); } finally { setBusy(false); }
+  }
+
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", padding: "6px 8px", marginBottom: "6px",
+    border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", fontFamily: "var(--font-body)",
+  };
+  const iconBtn = {
+    background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)",
+    padding: "3px", display: "flex", alignItems: "center",
+  };
+
+  return (
+    <div style={{ padding: "10px 0", borderBottom: isLast ? "none" : "1px solid var(--border)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>
+            {m.first_name} {m.last_name}
+          </div>
+          <div style={{ display: "flex", gap: "12px", marginTop: "3px", flexWrap: "wrap" }}>
+            {m.phone && (
+              <span style={{ fontSize: "11.5px", color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                <Phone size={11} /> {m.phone}
+              </span>
+            )}
+            {m.address && (
+              <span style={{ fontSize: "11.5px", color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                <MapPin size={11} /> {m.address}{m.postal_code ? `, ${m.postal_code}` : ""}
+              </span>
+            )}
+            {m.willing_to_host && (
+              <span style={{ fontSize: "11px", color: "var(--teal)", fontWeight: 600 }}>Willing to host</span>
+            )}
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexShrink: 0, marginLeft: "10px" }}>
+          <span style={{
+            fontSize: "11px", padding: "3px 9px", borderRadius: "999px", fontWeight: 600,
+            background: m.role === "Bethel Leader" ? "rgba(107,42,62,0.10)" : "var(--bg)",
+            color: m.role === "Bethel Leader" ? "var(--plum)" : "var(--ink-muted)",
+            border: "1px solid var(--border)",
+          }}>
+            {m.role}
+          </span>
+          <button title="Edit address/phone" style={iconBtn} onClick={() => setMode(mode === "edit" ? null : "edit")}><Edit2 size={13} /></button>
+          <button title="Move to another Bethel" style={iconBtn} onClick={() => setMode(mode === "move" ? null : "move")}><ArrowRightLeft size={13} /></button>
+          <button title="Remove" style={{ ...iconBtn, color: "var(--brick)" }} onClick={doRemove}><Trash2 size={13} /></button>
+        </div>
+      </div>
+
+      {mode === "edit" && (
+        <div style={{ marginTop: "10px", padding: "10px", background: "var(--bg)", borderRadius: "8px" }}>
+          <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+          <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+          <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button disabled={busy} onClick={saveEdit} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button onClick={() => setMode(null)} style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {mode === "move" && (
+        <div style={{ marginTop: "10px", padding: "10px", background: "var(--bg)", borderRadius: "8px" }}>
+          <select style={inputStyle} value={moveTarget} onChange={(e) => setMoveTarget(e.target.value)}>
+            <option value="">Choose destination Bethel…</option>
+            {bethels.filter((b) => b.bethel_id !== currentBethelId).map((b) => (
+              <option key={b.bethel_id} value={b.bethel_id}>{b.hp_number} — {b.leader_name} ({b.zone_name})</option>
+            ))}
+          </select>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button disabled={busy || !moveTarget} onClick={doMove} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: moveTarget ? "var(--plum)" : "var(--border)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: moveTarget ? "pointer" : "not-allowed" }}>
+              {busy ? "Moving…" : "Move"}
+            </button>
+            <button onClick={() => setMode(null)} style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AddMemberForm({ bethelId, onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre" });
+  const [saving, setSaving] = useState(false);
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: "7px",
+    border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", fontFamily: "var(--font-body)",
+  };
+
+  async function submit() {
+    if (!form.first_name || !form.last_name) return;
+    setSaving(true);
+    try {
+      await supaPost("members", { ...form, bethel_id: bethelId, status: "active" });
+      setForm({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre" });
+      setOpen(false);
+      onAdded();
+    } catch (e) { alert("Error: " + e.message); } finally { setSaving(false); }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{
+        marginTop: "12px", display: "flex", alignItems: "center", gap: "6px", padding: "8px 12px",
+        borderRadius: "8px", border: "1px dashed var(--border)", background: "transparent",
+        color: "var(--plum)", fontSize: "12.5px", fontWeight: 600, cursor: "pointer", width: "100%", justifyContent: "center",
+      }}>
+        <Plus size={13} /> Add member
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: "12px", padding: "12px", background: "var(--bg)", borderRadius: "8px" }}>
+      <input style={inputStyle} placeholder="First name" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
+      <input style={inputStyle} placeholder="Last name" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
+      <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+      <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+      <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+      <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
+        {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
+      </select>
+      <div style={{ display: "flex", gap: "8px" }}>
+        <button disabled={saving} onClick={submit} style={{ padding: "7px 14px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+          {saving ? "Adding…" : "Add"}
+        </button>
+        <button onClick={() => setOpen(false)} style={{ padding: "7px 14px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Fenêtre : détail d'un Bethel, avec ses membres                     */
+/* ------------------------------------------------------------------ */
+function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [editingAddress, setEditingAddress] = useState(false);
+  const [addrForm, setAddrForm] = useState(bethel.address || "");
+  const [changingZone, setChangingZone] = useState(false);
+  const [zoneQuery, setZoneQuery] = useState("");
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await supaGet("members", `bethel_id=eq.${bethel.bethel_id}&order=role.asc,first_name.asc`);
-        setMembers(data);
-      } catch (e) {
-        setError(e.message);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [bethel.bethel_id]);
+  async function loadMembers() {
+    setLoading(true);
+    try {
+      const data = await supaGet("members", `bethel_id=eq.${bethel.bethel_id}&order=role.asc,first_name.asc`);
+      setMembers(data);
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
+  }
+
+  useEffect(() => { loadMembers(); }, [bethel.bethel_id]);
 
   const ROLE_ORDER = ['Bethel Leader', 'Ananias', 'Overseer', 'Ministre Ordonné', 'Assistant Pasteur', 'Pasteur', 'Membre'];
   const sortedMembers = [...members].sort((a, b) => {
@@ -350,29 +532,82 @@ function BethelDetailModal({ bethel, onClose }) {
     return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
   });
 
+  async function saveAddress() {
+    try {
+      await supaPatch("bethels", `bethel_id=eq.${bethel.bethel_id}`, { address: addrForm });
+      setEditingAddress(false);
+      onChanged();
+    } catch (e) { alert("Error: " + e.message); }
+  }
+
+  const zoneMatches = zoneQuery.trim().length >= 2
+    ? zones.filter((z) => z.zone_name.toLowerCase().includes(zoneQuery.toLowerCase()) || z.city_name.toLowerCase().includes(zoneQuery.toLowerCase())).slice(0, 6)
+    : [];
+
+  async function changeZone(z) {
+    try {
+      await supaPatch("bethels", `bethel_id=eq.${bethel.bethel_id}`, { zone_id: z.zone_id });
+      setChangingZone(false);
+      setZoneQuery("");
+      onChanged();
+    } catch (e) { alert("Error: " + e.message); }
+  }
+
   return (
     <div style={{
       position: "fixed", inset: 0, background: "rgba(36,30,24,0.45)",
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "20px",
     }} onClick={onClose}>
       <div style={{
-        background: "var(--surface)", borderRadius: "14px", width: "520px", maxWidth: "100%",
-        maxHeight: "80vh", display: "flex", flexDirection: "column",
+        background: "var(--surface)", borderRadius: "14px", width: "540px", maxWidth: "100%",
+        maxHeight: "85vh", display: "flex", flexDirection: "column",
         padding: "28px", boxShadow: "0 24px 60px rgba(36,30,24,0.25)",
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-          <div>
+          <div style={{ minWidth: 0, flex: 1 }}>
             <h2 style={{ fontFamily: "var(--font-display)", fontSize: "22px", margin: 0, color: "var(--ink)" }}>
               {bethel.leader_name}
             </h2>
-            <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
               <span style={{ fontFamily: "var(--font-mono)" }}>{bethel.hp_number}</span>
               <ZoneStamp code={bethel.zone_code} muted />
               <span>{bethel.zone_name}</span>
+              <button onClick={() => setChangingZone(!changingZone)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--plum)", fontSize: "11.5px", fontWeight: 600 }}>
+                Change
+              </button>
             </div>
-            {bethel.address && (
-              <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "6px", display: "flex", alignItems: "center", gap: "5px" }}>
-                <MapPin size={12} /> {bethel.address}
+
+            {changingZone && (
+              <div style={{ marginTop: "8px" }}>
+                <input
+                  autoFocus
+                  placeholder="Search a zone…"
+                  value={zoneQuery}
+                  onChange={(e) => setZoneQuery(e.target.value)}
+                  style={{ width: "100%", boxSizing: "border-box", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px" }}
+                />
+                {zoneMatches.map((z) => (
+                  <button key={z.zone_id} onClick={() => changeZone(z)} style={{
+                    display: "block", width: "100%", textAlign: "left", padding: "6px 8px", border: "none",
+                    background: "var(--bg)", borderRadius: "6px", marginTop: "4px", fontSize: "12px", cursor: "pointer",
+                  }}>
+                    {z.zone_name} · {z.city_name}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!editingAddress ? (
+              <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+                <MapPin size={12} /> {bethel.address || "No address"}
+                <button onClick={() => { setAddrForm(bethel.address || ""); setEditingAddress(true); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--plum)", fontSize: "11px", fontWeight: 600 }}>
+                  Edit
+                </button>
+              </div>
+            ) : (
+              <div style={{ marginTop: "6px", display: "flex", gap: "6px" }}>
+                <input value={addrForm} onChange={(e) => setAddrForm(e.target.value)} style={{ flex: 1, boxSizing: "border-box", padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12px" }} />
+                <button onClick={saveAddress} style={{ padding: "5px 10px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "11.5px", cursor: "pointer" }}>Save</button>
               </div>
             )}
           </div>
@@ -386,49 +621,29 @@ function BethelDetailModal({ bethel, onClose }) {
             {loading ? "Loading members…" : `${members.length} member${members.length === 1 ? "" : "s"}`}
           </div>
 
-          {error && (
-            <div style={{ fontSize: "13px", color: "var(--brick)" }}>Could not load members: {error}</div>
-          )}
-
+          {error && <div style={{ fontSize: "13px", color: "var(--brick)" }}>Could not load members: {error}</div>}
           {!loading && members.length === 0 && !error && (
             <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>No members recorded for this Bethel yet.</div>
           )}
 
           {sortedMembers.map((m, i) => (
-            <div key={m.member_id} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
-              padding: "10px 0", borderBottom: i < sortedMembers.length - 1 ? "1px solid var(--border)" : "none",
-            }}>
-              <div>
-                <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>
-                  {m.first_name} {m.last_name}
-                </div>
-                <div style={{ display: "flex", gap: "12px", marginTop: "3px", flexWrap: "wrap" }}>
-                  {m.phone && (
-                    <span style={{ fontSize: "11.5px", color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
-                      <Phone size={11} /> {m.phone}
-                    </span>
-                  )}
-                  {m.willing_to_host && (
-                    <span style={{ fontSize: "11px", color: "var(--teal)", fontWeight: 600 }}>Willing to host</span>
-                  )}
-                </div>
-              </div>
-              <span style={{
-                fontSize: "11px", padding: "3px 9px", borderRadius: "999px", fontWeight: 600,
-                background: m.role === "Bethel Leader" ? "rgba(107,42,62,0.10)" : "var(--bg)",
-                color: m.role === "Bethel Leader" ? "var(--plum)" : "var(--ink-muted)",
-                border: "1px solid var(--border)", flexShrink: 0, marginLeft: "10px",
-              }}>
-                {m.role}
-              </span>
-            </div>
+            <MemberRow
+              key={m.member_id}
+              m={m}
+              bethels={bethels}
+              currentBethelId={bethel.bethel_id}
+              isLast={i === sortedMembers.length - 1}
+              onChanged={() => { loadMembers(); onChanged(); }}
+            />
           ))}
+
+          <AddMemberForm bethelId={bethel.bethel_id} onAdded={loadMembers} />
         </div>
       </div>
     </div>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /* Vues                                                                */
@@ -475,8 +690,20 @@ function DashboardView({ submissions, bethels, zones }) {
 }
 
 function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
-  const [filter, setFilter] = useState("pending");
-  const filtered = submissions.filter((s) => (filter === "all" ? true : s.status === filter));
+  const [filter, setFilter] = useState("ready");
+  const readyToHost = submissions.filter((s) => s.status === "pending" && s.willing_to_host);
+  const filtered =
+    filter === "ready" ? readyToHost
+    : filter === "all" ? submissions
+    : submissions.filter((s) => s.status === filter);
+
+  // Dans "Pending" et "All", les gens prêts à héberger remontent toujours en premier.
+  const sorted = [...filtered].sort((a, b) => {
+    if (filter === "ready") return 0;
+    const ra = a.status === "pending" && a.willing_to_host ? 0 : 1;
+    const rb = b.status === "pending" && b.willing_to_host ? 0 : 1;
+    return ra - rb;
+  });
 
   return (
     <div>
@@ -496,13 +723,18 @@ function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: "6px", marginBottom: "16px" }}>
-        {["pending", "approved", "all"].map((f) => (
-          <button key={f} onClick={() => setFilter(f)} style={{
+      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+        {[
+          { id: "ready", label: `⭐ Ready to host (${readyToHost.length})` },
+          { id: "pending", label: "Pending" },
+          { id: "approved", label: "Approved" },
+          { id: "all", label: "All" },
+        ].map((f) => (
+          <button key={f.id} onClick={() => setFilter(f.id)} style={{
             padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
-            border: `1px solid ${filter === f ? "var(--plum)" : "var(--border)"}`,
-            background: filter === f ? "var(--plum)" : "var(--surface)",
-            color: filter === f ? "#fff" : "var(--ink-muted)", cursor: "pointer", textTransform: "capitalize",
+            border: `1px solid ${filter === f.id ? "var(--plum)" : "var(--border)"}`,
+            background: filter === f.id ? "var(--plum)" : "var(--surface)",
+            color: filter === f.id ? "#fff" : "var(--ink-muted)", cursor: "pointer",
           }}>
             {f}
           </button>
@@ -510,18 +742,24 @@ function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
       </div>
 
       <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
-        {filtered.length === 0 && (
+        {sorted.length === 0 && (
           <div style={{ padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
-            No submissions here yet — click "New submission" to test, or wait for your real intake form to send data here.
+            {filter === "ready"
+              ? "Nobody is currently pending and willing to host."
+              : "No submissions here yet — click \"New submission\" to test, or wait for your real intake form to send data here."}
           </div>
         )}
-        {filtered.map((s, i) => (
+        {sorted.map((s, i) => {
+          const readyBadge = s.status === "pending" && s.willing_to_host;
+          return (
           <div key={s.submission_id} style={{
             display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 18px",
-            borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none", background: "var(--surface)",
+            borderBottom: i < sorted.length - 1 ? "1px solid var(--border)" : "none",
+            background: readyBadge ? "rgba(184,134,59,0.06)" : "var(--surface)",
           }}>
             <div style={{ minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                {readyBadge && <span title="Ready to host">⭐</span>}
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink-muted)" }}>{s.hp_number}</span>
                 <span style={{ fontSize: "14.5px", fontWeight: 600, color: "var(--ink)" }}>{s.first_name} {s.last_name}</span>
                 <StatusPill status={s.status} />
@@ -564,7 +802,8 @@ function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
               <span style={{ flexShrink: 0, marginLeft: "12px", color: "var(--teal)" }}><Check size={18} /></span>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -881,7 +1120,13 @@ export default function BethelAdminPortal() {
         />
       )}
       {detailFor && (
-        <BethelDetailModal bethel={detailFor} onClose={() => setDetailFor(null)} />
+        <BethelDetailModal
+          bethel={detailFor}
+          bethels={bethels}
+          zones={zones}
+          onClose={() => setDetailFor(null)}
+          onChanged={loadAll}
+        />
       )}
     </div>
   );
