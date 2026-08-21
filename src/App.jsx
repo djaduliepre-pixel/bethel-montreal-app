@@ -324,6 +324,113 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Fenêtre : détail d'un Bethel, avec ses membres                     */
+/* ------------------------------------------------------------------ */
+function BethelDetailModal({ bethel, onClose }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const data = await supaGet("members", `bethel_id=eq.${bethel.bethel_id}&order=role.asc,first_name.asc`);
+        setMembers(data);
+      } catch (e) {
+        setError(e.message);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [bethel.bethel_id]);
+
+  const ROLE_ORDER = ['Bethel Leader', 'Ananias', 'Overseer', 'Ministre Ordonné', 'Assistant Pasteur', 'Pasteur', 'Membre'];
+  const sortedMembers = [...members].sort((a, b) => {
+    const ia = ROLE_ORDER.indexOf(a.role); const ib = ROLE_ORDER.indexOf(b.role);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(36,30,24,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "20px",
+    }} onClick={onClose}>
+      <div style={{
+        background: "var(--surface)", borderRadius: "14px", width: "520px", maxWidth: "100%",
+        maxHeight: "80vh", display: "flex", flexDirection: "column",
+        padding: "28px", boxShadow: "0 24px 60px rgba(36,30,24,0.25)",
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "22px", margin: 0, color: "var(--ink)" }}>
+              {bethel.leader_name}
+            </h2>
+            <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px", display: "flex", alignItems: "center", gap: "8px" }}>
+              <span style={{ fontFamily: "var(--font-mono)" }}>{bethel.hp_number}</span>
+              <ZoneStamp code={bethel.zone_code} muted />
+              <span>{bethel.zone_name}</span>
+            </div>
+            {bethel.address && (
+              <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "6px", display: "flex", alignItems: "center", gap: "5px" }}>
+                <MapPin size={12} /> {bethel.address}
+              </div>
+            )}
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", padding: "4px", flexShrink: 0 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid var(--border)", overflowY: "auto", flex: 1 }}>
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "10px" }}>
+            {loading ? "Loading members…" : `${members.length} member${members.length === 1 ? "" : "s"}`}
+          </div>
+
+          {error && (
+            <div style={{ fontSize: "13px", color: "var(--brick)" }}>Could not load members: {error}</div>
+          )}
+
+          {!loading && members.length === 0 && !error && (
+            <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>No members recorded for this Bethel yet.</div>
+          )}
+
+          {sortedMembers.map((m, i) => (
+            <div key={m.member_id} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "flex-start",
+              padding: "10px 0", borderBottom: i < sortedMembers.length - 1 ? "1px solid var(--border)" : "none",
+            }}>
+              <div>
+                <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>
+                  {m.first_name} {m.last_name}
+                </div>
+                <div style={{ display: "flex", gap: "12px", marginTop: "3px", flexWrap: "wrap" }}>
+                  {m.phone && (
+                    <span style={{ fontSize: "11.5px", color: "var(--ink-muted)", display: "flex", alignItems: "center", gap: "4px" }}>
+                      <Phone size={11} /> {m.phone}
+                    </span>
+                  )}
+                  {m.willing_to_host && (
+                    <span style={{ fontSize: "11px", color: "var(--teal)", fontWeight: 600 }}>Willing to host</span>
+                  )}
+                </div>
+              </div>
+              <span style={{
+                fontSize: "11px", padding: "3px 9px", borderRadius: "999px", fontWeight: 600,
+                background: m.role === "Bethel Leader" ? "rgba(107,42,62,0.10)" : "var(--bg)",
+                color: m.role === "Bethel Leader" ? "var(--plum)" : "var(--ink-muted)",
+                border: "1px solid var(--border)", flexShrink: 0, marginLeft: "10px",
+              }}>
+                {m.role}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Vues                                                                */
 /* ------------------------------------------------------------------ */
 function DashboardView({ submissions, bethels, zones }) {
@@ -463,12 +570,12 @@ function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
   );
 }
 
-function BethelsView({ bethels }) {
+function BethelsView({ bethels, onOpenDetail }) {
   return (
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Bethels</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
-        Rows from your real "bethels" table.
+        Rows from your real "bethels" table. Click a card to see its members.
       </p>
       {bethels.length === 0 ? (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
@@ -477,7 +584,17 @@ function BethelsView({ bethels }) {
       ) : (
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px" }}>
           {bethels.map((b) => (
-            <div key={b.bethel_id} style={{ background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px", padding: "16px 18px" }}>
+            <button
+              key={b.bethel_id}
+              onClick={() => onOpenDetail(b)}
+              style={{
+                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px",
+                padding: "16px 18px", textAlign: "left", cursor: "pointer", fontFamily: "var(--font-body)",
+                transition: "border-color 0.15s",
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--plum)"}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = "var(--border)"}
+            >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
                 <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink-muted)" }}>{b.hp_number}</span>
                 <ZoneStamp code={b.zone_code} />
@@ -489,7 +606,10 @@ function BethelsView({ bethels }) {
                   <MapPin size={12} /> {b.address}
                 </div>
               )}
-            </div>
+              <div style={{ marginTop: "10px", fontSize: "11.5px", color: "var(--plum)", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
+                View members <ChevronRight size={12} />
+              </div>
+            </button>
           ))}
         </div>
       )}
@@ -607,6 +727,7 @@ export default function BethelAdminPortal() {
   const [campusId, setCampusId] = useState(null);
   const [activateFor, setActivateFor] = useState(null);
   const [showNewSubmission, setShowNewSubmission] = useState(false);
+  const [detailFor, setDetailFor] = useState(null);
   const [activating, setActivating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -736,7 +857,7 @@ export default function BethelAdminPortal() {
                 onAddNew={() => setShowNewSubmission(true)}
               />
             )}
-            {view === "bethels" && <BethelsView bethels={bethels} />}
+            {view === "bethels" && <BethelsView bethels={bethels} onOpenDetail={setDetailFor} />}
             {view === "reports" && <ReportsView submissions={submissions} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
@@ -758,6 +879,9 @@ export default function BethelAdminPortal() {
           onClose={() => setShowNewSubmission(false)}
           onCreated={() => { setShowNewSubmission(false); loadAll(); }}
         />
+      )}
+      {detailFor && (
+        <BethelDetailModal bethel={detailFor} onClose={() => setDetailFor(null)} />
       )}
     </div>
   );
