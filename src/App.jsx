@@ -736,7 +736,7 @@ function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
             background: filter === f.id ? "var(--plum)" : "var(--surface)",
             color: filter === f.id ? "#fff" : "var(--ink-muted)", cursor: "pointer",
           }}>
-            {f}
+            {f.label}
           </button>
         ))}
       </div>
