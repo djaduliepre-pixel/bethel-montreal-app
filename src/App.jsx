@@ -1671,8 +1671,34 @@ export default function BethelAdminPortal() {
   const handleActivate = useCallback(async (submission, zone) => {
     setActivating(true);
     try {
+      // Détermine le bon préfixe de ville à partir du nom de la zone choisie
+      // (ex: "Laval Chomedey" -> LVL, "Repentigny Repentigny" -> RPT), pour que
+      // la numérotation continue celle de la vraie ville, pas toujours Montréal.
+      const PREFIXE_PAR_VILLE = {
+        'Montreal': 'MTL', 'Laval': 'LVL', 'Repentigny': 'RPT', 'Terrebonne': 'TRB',
+        'Trois-Rivières': 'TRM', 'Sherbrooke': 'SHR', 'Région': 'QBC',
+        'Lachenaie': 'LCN', 'Mascouche': 'MSC', 'Longueuil': 'LNG',
+        'Winnipeg': 'WIN', 'Manitoba': 'MTA', 'New-Brunswick': 'NBW', 'Alberta': 'ALB',
+      };
+      const premierMot = zone.zone_name.split(' ')[0];
+      const prefixeVille = PREFIXE_PAR_VILLE[premierMot] || 'MTL';
+
+      let nouveauNumero = `BETHEL-${prefixeVille}-${Date.now()}`; // repli si la recherche échoue
+      try {
+        const existants = await supaGet("bethels", `hp_number=like.BETHEL-${prefixeVille}-*&select=hp_number`);
+        let max = 0;
+        existants.forEach((b) => {
+          const m = b.hp_number.match(new RegExp(`^BETHEL-${prefixeVille}-(\\d+)`));
+          if (m) {
+            const n = parseInt(m[1], 10);
+            if (n > max) max = n;
+          }
+        });
+        nouveauNumero = `BETHEL-${prefixeVille}-${max + 1}`;
+      } catch (e) { /* on garde le repli si la recherche échoue */ }
+
       await supaPost("bethels", {
-        hp_number: submission.hp_number,
+        hp_number: nouveauNumero,
         campus_id: submission.campus_id,
         zone_id: zone.zone_id,
         leader_name: `${submission.first_name} ${submission.last_name}`,
