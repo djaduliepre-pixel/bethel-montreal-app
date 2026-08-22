@@ -413,6 +413,12 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
     return zones.filter((z) => z.zone_name.toLowerCase().includes(q) || z.city_name.toLowerCase().includes(q)).slice(0, 8);
   }, [zoneQuery, zones]);
 
+  const nomZoneSuggeree = useMemo(() => suggererZoneDepuisAdresse(submission.address), [submission.address]);
+  const zoneSuggeree = useMemo(
+    () => (nomZoneSuggeree ? zones.find((z) => z.zone_name === nomZoneSuggeree) : null),
+    [nomZoneSuggeree, zones]
+  );
+
   async function pickZone(z) {
     setSelectedZone(z);
     setZoneQuery("");
@@ -494,19 +500,35 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
               </button>
             </div>
           ) : (
-            <div style={{ position: "relative", marginTop: "8px" }}>
-              <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
-              <input
-                value={zoneQuery}
-                onChange={(e) => setZoneQuery(e.target.value)}
-                placeholder="Type a neighborhood or city…"
-                style={{
-                  width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px",
-                  border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none",
-                }}
-              />
-              {zoneMatches.length > 0 && (
-                <div style={{ marginTop: "6px", border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" }}>
+            <>
+              {zoneSuggeree && (
+                <button
+                  onClick={() => pickZone(zoneSuggeree)}
+                  style={{
+                    display: "flex", alignItems: "center", gap: "8px", width: "100%", textAlign: "left",
+                    padding: "9px 12px", marginTop: "8px", borderRadius: "8px", cursor: "pointer",
+                    border: "1.5px solid var(--teal)", background: "rgba(31,92,78,0.06)", fontFamily: "var(--font-body)",
+                  }}
+                >
+                  <Sparkles size={14} color="var(--teal)" style={{ flexShrink: 0 }} />
+                  <span style={{ fontSize: "12.5px", color: "var(--teal)" }}>
+                    Suggested from postal code: <strong>{zoneSuggeree.zone_name}</strong> — click to use
+                  </span>
+                </button>
+              )}
+              <div style={{ position: "relative", marginTop: "8px" }}>
+                <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+                <input
+                  value={zoneQuery}
+                  onChange={(e) => setZoneQuery(e.target.value)}
+                  placeholder="Type a neighborhood or city…"
+                  style={{
+                    width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px",
+                    border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none",
+                  }}
+                />
+                {zoneMatches.length > 0 && (
+                  <div style={{ marginTop: "6px", border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" }}>
                   {zoneMatches.map((z) => (
                     <button key={z.zone_id} onClick={() => pickZone(z)} style={{
                       display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between",
@@ -519,7 +541,8 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
                   ))}
                 </div>
               )}
-            </div>
+              </div>
+            </>
           )}
 
           {selectedZone && (
