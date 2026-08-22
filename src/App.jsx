@@ -564,7 +564,7 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 /* ------------------------------------------------------------------ */
 /* Fenêtre : détail d'un Bethel, avec ses membres                     */
 /* ------------------------------------------------------------------ */
-function MemberRow({ m, bethels, currentBethelId, onChanged, isLast }) {
+function MemberRow({ m, bethels, currentBethelId, onChanged, isLast, onOpenProfile }) {
   const [mode, setMode] = useState(null); // null | 'edit' | 'move'
   const [form, setForm] = useState({
     phone: m.phone || "", address: m.address || "", postal_code: m.postal_code || "",
@@ -628,7 +628,12 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
           <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>
-            {m.first_name} {m.last_name}
+            <button
+              onClick={() => onOpenProfile(m)}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", font: "inherit", color: "inherit", textDecoration: "underline", textDecorationColor: "var(--border)", textUnderlineOffset: "3px" }}
+            >
+              {m.first_name} {m.last_name}
+            </button>
           </div>
           <div style={{ display: "flex", gap: "12px", marginTop: "3px", flexWrap: "wrap" }}>
             {m.phone && (
@@ -718,6 +723,148 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Fenêtre : Profil complet d'un membre                                */
+/* ------------------------------------------------------------------ */
+function MemberProfileModal({ member, onClose, onSaved }) {
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    first_name: member.first_name || "", last_name: member.last_name || "",
+    phone: member.phone || "", email: member.email || "", gender: member.gender || "",
+    address: member.address || "", postal_code: member.postal_code || "",
+    role: member.role || "Membre",
+    ananias_name: member.ananias_name || "", bethel_leader_name: member.bethel_leader_name || "",
+    overseer_name: member.overseer_name || "", ordained_minister_name: member.ordained_minister_name || "",
+    willing_to_host: member.willing_to_host || false,
+  });
+
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: "8px",
+    border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", fontFamily: "var(--font-body)",
+  };
+  const labelStyle = { fontSize: "10.5px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", display: "block", marginBottom: "3px" };
+
+  function Field({ label, value }) {
+    if (!value) return null;
+    return (
+      <div style={{ marginBottom: "12px" }}>
+        <span style={labelStyle}>{label}</span>
+        <div style={{ fontSize: "13.5px", color: "var(--ink)" }}>{value}</div>
+      </div>
+    );
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      await supaPatch("members", `member_id=eq.${member.member_id}`, form);
+      setEditing(false);
+      onSaved();
+    } catch (e) { alert("Error: " + e.message); } finally { setSaving(false); }
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(36,30,24,0.5)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: "20px",
+    }} onClick={onClose}>
+      <div style={{
+        background: "var(--surface)", borderRadius: "14px", width: "420px", maxWidth: "100%",
+        maxHeight: "85vh", display: "flex", flexDirection: "column",
+        padding: "26px", boxShadow: "0 24px 60px rgba(36,30,24,0.3)",
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: 0, color: "var(--ink)" }}>
+            {editing ? "Edit profile" : `${member.first_name} ${member.last_name}`}
+          </h2>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", padding: "4px" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ marginTop: "14px", overflowY: "auto", flex: 1 }}>
+          {!editing ? (
+            <>
+              <Field label="Role" value={member.role} />
+              <Field label="Phone" value={member.phone} />
+              <Field label="Email" value={member.email} />
+              <Field label="Gender" value={member.gender} />
+              <Field label="Address" value={member.address ? `${member.address}${member.postal_code ? ", " + member.postal_code : ""}` : null} />
+              <Field label="Willing to host" value={member.willing_to_host ? "Yes" : "No"} />
+
+              {(member.ananias_name || member.bethel_leader_name || member.overseer_name || member.ordained_minister_name) && (
+                <>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", marginTop: "16px", marginBottom: "10px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
+                    Supervision chain
+                  </div>
+                  <Field label="Ananias" value={member.ananias_name} />
+                  <Field label="Bethel Leader" value={member.bethel_leader_name} />
+                  <Field label="Overseer" value={member.overseer_name} />
+                  <Field label="Ministre Ordonné" value={member.ordained_minister_name} />
+                </>
+              )}
+
+              <button onClick={() => setEditing(true)} style={{
+                marginTop: "10px", width: "100%", padding: "9px", borderRadius: "8px",
+                border: "1px solid var(--plum)", background: "transparent", color: "var(--plum)",
+                fontSize: "13px", fontWeight: 600, cursor: "pointer",
+              }}>
+                Edit full profile
+              </button>
+            </>
+          ) : (
+            <>
+              <span style={labelStyle}>First / last name</span>
+              <div style={{ display: "flex", gap: "6px" }}>
+                <input style={inputStyle} value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
+                <input style={inputStyle} value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
+              </div>
+              <span style={labelStyle}>Phone / Email</span>
+              <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+              <input style={inputStyle} placeholder="Email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
+              <span style={labelStyle}>Gender</span>
+              <input style={inputStyle} value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value }))} />
+              <span style={labelStyle}>Address / Postal code</span>
+              <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+              <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+              <span style={labelStyle}>Role</span>
+              <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
+                {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink)", margin: "6px 0 10px" }}>
+                <input type="checkbox" checked={form.willing_to_host} onChange={(e) => setForm((f) => ({ ...f, willing_to_host: e.target.checked }))} />
+                Willing to host
+              </label>
+
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", marginTop: "6px", marginBottom: "8px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+                Supervision chain
+              </div>
+              <span style={labelStyle}>Ananias</span>
+              <input style={inputStyle} value={form.ananias_name} onChange={(e) => setForm((f) => ({ ...f, ananias_name: e.target.value }))} />
+              <span style={labelStyle}>Bethel Leader</span>
+              <input style={inputStyle} value={form.bethel_leader_name} onChange={(e) => setForm((f) => ({ ...f, bethel_leader_name: e.target.value }))} />
+              <span style={labelStyle}>Overseer</span>
+              <input style={inputStyle} value={form.overseer_name} onChange={(e) => setForm((f) => ({ ...f, overseer_name: e.target.value }))} />
+              <span style={labelStyle}>Ministre Ordonné</span>
+              <input style={inputStyle} value={form.ordained_minister_name} onChange={(e) => setForm((f) => ({ ...f, ordained_minister_name: e.target.value }))} />
+
+              <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
+                <button disabled={saving} onClick={save} style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
+                  {saving ? "Saving…" : "Save"}
+                </button>
+                <button onClick={() => setEditing(false)} style={{ flex: 1, padding: "9px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "13px", cursor: "pointer" }}>
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AddMemberForm({ bethelId, onAdded }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre" });
@@ -781,6 +928,7 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
   const [addrForm, setAddrForm] = useState(bethel.address || "");
   const [changingZone, setChangingZone] = useState(false);
   const [zoneQuery, setZoneQuery] = useState("");
+  const [profileFor, setProfileFor] = useState(null);
 
   async function loadMembers() {
     setLoading(true);
@@ -900,12 +1048,21 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
               currentBethelId={bethel.bethel_id}
               isLast={i === sortedMembers.length - 1}
               onChanged={() => { loadMembers(); onChanged(); }}
+              onOpenProfile={setProfileFor}
             />
           ))}
 
           <AddMemberForm bethelId={bethel.bethel_id} onAdded={loadMembers} />
         </div>
       </div>
+
+      {profileFor && (
+        <MemberProfileModal
+          member={profileFor}
+          onClose={() => setProfileFor(null)}
+          onSaved={() => { loadMembers(); onChanged(); setProfileFor(null); }}
+        />
+      )}
     </div>
   );
 }
