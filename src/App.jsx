@@ -295,6 +295,198 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Fenêtre : Assigner à un Bethel existant (pour ceux qui ont dit "Non")*/
+/* ------------------------------------------------------------------ */
+function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assigning }) {
+  const [zoneQuery, setZoneQuery] = useState("");
+  const [selectedZone, setSelectedZone] = useState(null);
+  const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
+  const [loadingDistances, setLoadingDistances] = useState(false);
+  const [selectedBethel, setSelectedBethel] = useState(null);
+
+  const zoneMatches = useMemo(() => {
+    if (zoneQuery.trim().length < 2) return [];
+    const q = zoneQuery.trim().toLowerCase();
+    return zones.filter((z) => z.zone_name.toLowerCase().includes(q) || z.city_name.toLowerCase().includes(q)).slice(0, 8);
+  }, [zoneQuery, zones]);
+
+  async function pickZone(z) {
+    setSelectedZone(z);
+    setZoneQuery("");
+    setSelectedBethel(null);
+    var inZone = bethels.filter((b) => b.zone_id === z.zone_id);
+    setCandidates(inZone.map((b) => ({ bethel: b, minutes: null, error: null })));
+
+    if (submission.address && inZone.length > 0) {
+      setLoadingDistances(true);
+      var results = await Promise.all(inZone.map(async (b) => {
+        if (!b.address) return { bethel: b, minutes: null, error: "No address on file" };
+        try {
+          var minutes = await getDrivingMinutes(submission.address, b.address);
+          return { bethel: b, minutes: minutes, error: null };
+        } catch (e) {
+          return { bethel: b, minutes: null, error: e.message };
+        }
+      }));
+      results.sort((a, b) => {
+        if (a.minutes == null) return 1;
+        if (b.minutes == null) return -1;
+        return a.minutes - b.minutes;
+      });
+      setCandidates(results);
+      setLoadingDistances(false);
+    }
+  }
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(36,30,24,0.45)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "20px",
+    }} onClick={onClose}>
+      <div style={{
+        background: "var(--surface)", borderRadius: "14px", width: "480px", maxWidth: "100%",
+        maxHeight: "85vh", display: "flex", flexDirection: "column",
+        padding: "28px", boxShadow: "0 24px 60px rgba(36,30,24,0.25)",
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "22px", margin: 0, color: "var(--ink)" }}>
+              Assign to a Bethel
+            </h2>
+            <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px", fontFamily: "var(--font-mono)" }}>
+              {submission.hp_number} · {submission.first_name} {submission.last_name}
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", padding: "4px" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {submission.address && (
+          <div style={{
+            marginTop: "14px", display: "flex", gap: "8px", alignItems: "flex-start",
+            background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px",
+          }}>
+            <MapPin size={16} color="var(--ink-muted)" style={{ marginTop: "2px", flexShrink: 0 }} />
+            <span style={{ fontSize: "13.5px", color: "var(--ink)", lineHeight: 1.4 }}>{submission.address}</span>
+          </div>
+        )}
+
+        <div style={{ marginTop: "16px", overflowY: "auto", flex: 1 }}>
+          <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>
+            Step 1 — Zone <span style={{ color: "var(--brick)" }}>*</span>
+          </label>
+
+          {selectedZone ? (
+            <div style={{
+              marginTop: "8px", display: "flex", alignItems: "center", justifyContent: "space-between",
+              border: "1px solid var(--border)", borderRadius: "8px", padding: "10px 12px",
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                <ZoneStamp code={selectedZone.zone_code} />
+                <span style={{ fontSize: "13.5px", color: "var(--ink)" }}>{selectedZone.zone_name}</span>
+              </div>
+              <button onClick={() => { setSelectedZone(null); setCandidates([]); setSelectedBethel(null); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}>
+                <X size={15} />
+              </button>
+            </div>
+          ) : (
+            <div style={{ position: "relative", marginTop: "8px" }}>
+              <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+              <input
+                value={zoneQuery}
+                onChange={(e) => setZoneQuery(e.target.value)}
+                placeholder="Type a neighborhood or city…"
+                style={{
+                  width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px",
+                  border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none",
+                }}
+              />
+              {zoneMatches.length > 0 && (
+                <div style={{ marginTop: "6px", border: "1px solid var(--border)", borderRadius: "8px", overflow: "hidden" }}>
+                  {zoneMatches.map((z) => (
+                    <button key={z.zone_id} onClick={() => pickZone(z)} style={{
+                      display: "flex", width: "100%", alignItems: "center", justifyContent: "space-between",
+                      padding: "9px 12px", border: "none", borderBottom: "1px solid var(--border)",
+                      background: "var(--surface)", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-body)",
+                    }}>
+                      <span style={{ fontSize: "13px", color: "var(--ink)" }}>{z.zone_name} <span style={{ color: "var(--ink-muted)" }}>· {z.city_name}</span></span>
+                      <ChevronRight size={14} color="var(--ink-muted)" />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedZone && (
+            <>
+              <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)", marginTop: "18px", display: "block" }}>
+                Step 2 — Choose a Bethel {loadingDistances && <span style={{ fontWeight: 400, color: "var(--ink-muted)" }}>(checking travel times…)</span>}
+              </label>
+              {candidates.length === 0 && (
+                <div style={{ marginTop: "8px", fontSize: "13px", color: "var(--ink-muted)" }}>No active Bethels in this zone yet.</div>
+              )}
+              <div style={{ marginTop: "8px" }}>
+                {candidates.map((c) => (
+                  <button
+                    key={c.bethel.bethel_id}
+                    onClick={() => setSelectedBethel(c.bethel)}
+                    style={{
+                      display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center",
+                      padding: "10px 12px", marginBottom: "6px", borderRadius: "8px", textAlign: "left", cursor: "pointer",
+                      border: selectedBethel?.bethel_id === c.bethel.bethel_id ? "2px solid var(--plum)" : "1px solid var(--border)",
+                      background: "var(--surface)", fontFamily: "var(--font-body)",
+                    }}
+                  >
+                    <div>
+                      <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{c.bethel.leader_name}</div>
+                      <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{c.bethel.hp_number}</div>
+                    </div>
+                    {c.minutes != null ? (
+                      <span style={{
+                        fontSize: "11.5px", fontWeight: 600, padding: "3px 9px", borderRadius: "999px",
+                        background: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "rgba(31,92,78,0.10)" : "rgba(184,134,59,0.12)",
+                        color: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "var(--teal)" : "var(--gold)",
+                      }}>
+                        🚗 {c.minutes} min
+                      </span>
+                    ) : c.error ? (
+                      <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>{c.error}</span>
+                    ) : null}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+
+        <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end", gap: "10px", flexShrink: 0 }}>
+          <button onClick={onClose} style={{
+            padding: "9px 16px", borderRadius: "8px", border: "1px solid var(--border)",
+            background: "var(--surface)", color: "var(--ink)", fontSize: "13.5px", cursor: "pointer",
+          }}>
+            Cancel
+          </button>
+          <button
+            disabled={!selectedBethel || assigning}
+            onClick={() => selectedBethel && onAssign(submission, selectedBethel)}
+            style={{
+              padding: "9px 18px", borderRadius: "8px", border: "none",
+              background: selectedBethel ? "var(--plum)" : "var(--border)",
+              color: selectedBethel ? "#fff" : "var(--ink-muted)",
+              fontSize: "13.5px", fontWeight: 600, cursor: selectedBethel && !assigning ? "pointer" : "not-allowed",
+            }}
+          >
+            {assigning ? "Assigning…" : "Assign as member"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Fenêtre : Nouvelle soumission (pour tester sans SQL)                */
 /* ------------------------------------------------------------------ */
 function NewSubmissionModal({ campusId, onClose, onCreated }) {
@@ -763,7 +955,7 @@ function DashboardView({ submissions, bethels, zones }) {
   );
 }
 
-function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
+function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }) {
   const [filter, setFilter] = useState("ready");
   const readyToHost = submissions.filter((s) => s.status === "pending" && s.willing_to_host);
   const filtered =
@@ -866,12 +1058,22 @@ function SubmissionsView({ submissions, onOpenActivate, onAddNew }) {
               </div>
             </div>
             {s.status === "pending" ? (
-              <button onClick={() => onOpenActivate(s)} style={{
-                flexShrink: 0, marginLeft: "12px", padding: "8px 16px", borderRadius: "8px", border: "none",
-                background: "var(--plum)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer",
-              }}>
-                Activate
-              </button>
+              s.willing_to_host ? (
+                <button onClick={() => onOpenActivate(s)} style={{
+                  flexShrink: 0, marginLeft: "12px", padding: "8px 16px", borderRadius: "8px", border: "none",
+                  background: "var(--plum)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+                }}>
+                  Activate
+                </button>
+              ) : (
+                <button onClick={() => onOpenAssign(s)} style={{
+                  flexShrink: 0, marginLeft: "12px", padding: "8px 16px", borderRadius: "8px",
+                  border: "1px solid var(--plum)", background: "transparent", color: "var(--plum)",
+                  fontSize: "13px", fontWeight: 600, cursor: "pointer",
+                }}>
+                  Assign to Bethel
+                </button>
+              )
             ) : (
               <span style={{ flexShrink: 0, marginLeft: "12px", color: "var(--teal)" }}><Check size={18} /></span>
             )}
@@ -1039,6 +1241,8 @@ export default function BethelAdminPortal() {
   const [bethels, setBethels] = useState([]);
   const [campusId, setCampusId] = useState(null);
   const [activateFor, setActivateFor] = useState(null);
+  const [assignFor, setAssignFor] = useState(null);
+  const [assigning, setAssigning] = useState(false);
   const [showNewSubmission, setShowNewSubmission] = useState(false);
   const [detailFor, setDetailFor] = useState(null);
   const [activating, setActivating] = useState(false);
@@ -1096,6 +1300,31 @@ export default function BethelAdminPortal() {
       alert("Error activating Bethel: " + e.message);
     } finally {
       setActivating(false);
+    }
+  }, [loadAll]);
+
+  const handleAssign = useCallback(async (submission, targetBethel) => {
+    setAssigning(true);
+    try {
+      await supaPost("members", {
+        bethel_id: targetBethel.bethel_id,
+        first_name: submission.first_name,
+        last_name: submission.last_name,
+        phone: submission.phone,
+        address: submission.address,
+        role: submission.leadership_level === "hp_leader" ? "Bethel Leader" : (LEADERSHIP_LABELS[submission.leadership_level] || "Membre"),
+        willing_to_host: false,
+        status: "active",
+      });
+      await supaPatch("submissions", `submission_id=eq.${submission.submission_id}`, {
+        status: "approved", zone_id: targetBethel.zone_id, reviewed_at: new Date().toISOString(),
+      });
+      setAssignFor(null);
+      await loadAll();
+    } catch (e) {
+      alert("Error assigning member: " + e.message);
+    } finally {
+      setAssigning(false);
     }
   }, [loadAll]);
 
@@ -1167,6 +1396,7 @@ export default function BethelAdminPortal() {
               <SubmissionsView
                 submissions={submissions}
                 onOpenActivate={setActivateFor}
+                onOpenAssign={setAssignFor}
                 onAddNew={() => setShowNewSubmission(true)}
               />
             )}
@@ -1200,6 +1430,16 @@ export default function BethelAdminPortal() {
           zones={zones}
           onClose={() => setDetailFor(null)}
           onChanged={loadAll}
+        />
+      )}
+      {assignFor && (
+        <AssignMemberModal
+          submission={assignFor}
+          zones={zones}
+          bethels={bethels}
+          onClose={() => setAssignFor(null)}
+          onAssign={handleAssign}
+          assigning={assigning}
         />
       )}
     </div>
