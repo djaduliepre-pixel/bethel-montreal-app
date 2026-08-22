@@ -737,6 +737,7 @@ function MemberProfileModal({ member, onClose, onSaved }) {
     ananias_name: member.ananias_name || "", bethel_leader_name: member.bethel_leader_name || "",
     overseer_name: member.overseer_name || "", ordained_minister_name: member.ordained_minister_name || "",
     willing_to_host: member.willing_to_host || false,
+    status: member.status || "active",
   });
 
   const inputStyle = {
@@ -787,6 +788,7 @@ function MemberProfileModal({ member, onClose, onSaved }) {
           {!editing ? (
             <>
               <Field label="Role" value={member.role} />
+              <Field label="Status" value={member.status === "inactive" ? "Inactive" : "Active"} />
               <Field label="Phone" value={member.phone} />
               <Field label="Email" value={member.email} />
               <Field label="Gender" value={member.gender} />
@@ -831,6 +833,11 @@ function MemberProfileModal({ member, onClose, onSaved }) {
               <span style={labelStyle}>Role</span>
               <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
                 {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+              <span style={labelStyle}>Status</span>
+              <select style={inputStyle} value={form.status} onChange={(e) => setForm((f) => ({ ...f, status: e.target.value }))}>
+                <option value="active">Active</option>
+                <option value="inactive">Inactive</option>
               </select>
               <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink)", margin: "6px 0 10px" }}>
                 <input type="checkbox" checked={form.willing_to_host} onChange={(e) => setForm((f) => ({ ...f, willing_to_host: e.target.checked }))} />
@@ -1381,12 +1388,125 @@ function ZoneLookupView({ zones }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Vue : Recherche d'un membre parmi les 1200+, sur tous les Bethels  */
+/* ------------------------------------------------------------------ */
+function SearchMembersView({ bethels, onOpenBethel }) {
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [searched, setSearched] = useState(false);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setSearched(false); return; }
+    setLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const data = await supaGet(
+          "members",
+          `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*,phone.ilike.*${encodeURIComponent(q)}*)&order=first_name.asc&limit=40`
+        );
+        setResults(data);
+      } catch (e) {
+        setResults([]);
+      } finally {
+        setLoading(false);
+        setSearched(true);
+      }
+    }, 350); // petit délai pour éviter une requête à chaque lettre tapée
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  const bethelById = useMemo(() => Object.fromEntries(bethels.map((b) => [b.bethel_id, b])), [bethels]);
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Search Members</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
+        Find any of your {bethels.length ? "1200+" : ""} members and see which Bethel they belong to.
+      </p>
+
+      <div style={{ position: "relative", marginBottom: "20px", maxWidth: "420px" }}>
+        <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+        <input
+          autoFocus
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Type a name or phone number…"
+          style={{
+            width: "100%", boxSizing: "border-box", padding: "9px 10px 9px 32px",
+            border: "1px solid var(--border)", borderRadius: "8px", fontSize: "14px", outline: "none",
+          }}
+        />
+      </div>
+
+      {loading && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Searching…</div>}
+
+      {!loading && searched && results.length === 0 && (
+        <div style={{ fontSize: "13.5px", color: "var(--ink-muted)" }}>No member found matching "{query}".</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+        {results.map((m) => {
+          const bethel = bethelById[m.bethel_id];
+          return (
+            <button
+              key={m.member_id}
+              onClick={() => bethel && onOpenBethel(bethel)}
+              disabled={!bethel}
+              style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+                padding: "12px 16px", borderRadius: "10px", border: "1px solid var(--border)",
+                background: "var(--surface)", textAlign: "left", cursor: bethel ? "pointer" : "default",
+                fontFamily: "var(--font-body)",
+              }}
+            >
+              <div>
+                <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--ink)" }}>
+                  {m.first_name} {m.last_name}
+                  <span style={{
+                    marginLeft: "8px", fontSize: "11px", padding: "2px 8px", borderRadius: "999px", fontWeight: 600,
+                    background: m.role === "Bethel Leader" ? "rgba(107,42,62,0.10)" : "var(--bg)",
+                    color: m.role === "Bethel Leader" ? "var(--plum)" : "var(--ink-muted)",
+                    border: "1px solid var(--border)",
+                  }}>
+                    {m.role}
+                  </span>
+                </div>
+                {m.phone && (
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "3px", display: "flex", alignItems: "center", gap: "4px" }}>
+                    <Phone size={11} /> {m.phone}
+                  </div>
+                )}
+              </div>
+              {bethel ? (
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: "12.5px", color: "var(--ink)", display: "flex", alignItems: "center", gap: "6px", justifyContent: "flex-end" }}>
+                    <Users size={12} /> {bethel.leader_name}'s Bethel
+                  </div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "2px" }}>
+                    {bethel.hp_number} · {bethel.zone_name}
+                  </div>
+                </div>
+              ) : (
+                <span style={{ fontSize: "11.5px", color: "var(--brick)" }}>Bethel not found</span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* App                                                                 */
 /* ------------------------------------------------------------------ */
 const NAV = [
   { id: "dashboard", label: "Dashboard", icon: Home },
   { id: "submissions", label: "Submissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
+  { id: "search", label: "Search Members", icon: Search },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "zones", label: "Zone Lookup", icon: MapPin },
 ];
@@ -1558,6 +1678,7 @@ export default function BethelAdminPortal() {
               />
             )}
             {view === "bethels" && <BethelsView bethels={bethels} onOpenDetail={setDetailFor} />}
+            {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "reports" && <ReportsView submissions={submissions} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
