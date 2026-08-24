@@ -240,6 +240,16 @@ function suggererZoneDepuisAdresse(adresse) {
 function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
   const [query, setQuery] = useState("");
   const [selectedZone, setSelectedZone] = useState(null);
+  const [checklist, setChecklist] = useState({
+    propre: false, prive: false, capacite: false, places: false,
+  });
+  const CHECKLIST_ITEMS = [
+    { key: "propre", label: "The home is clean and well-maintained" },
+    { key: "prive", label: "It is not an intimate space (not a bedroom, bathroom, or kitchen)" },
+    { key: "capacite", label: "Can comfortably accommodate at least 4 people" },
+    { key: "places", label: "Seating for at least 4 people" },
+  ];
+  const checklistComplete = Object.values(checklist).every(Boolean);
 
   const matches = useMemo(() => {
     if (query.trim().length < 2) return [];
@@ -364,6 +374,34 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
         </div>
 
         {selectedZone && (
+          <div style={{ marginTop: "18px" }}>
+            <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>
+              Review checklist <span style={{ color: "var(--brick)" }}>*</span>
+            </label>
+            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "2px", marginBottom: "8px" }}>
+              Confirm each item before activating.
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 12px", background: "var(--bg)" }}>
+              {CHECKLIST_ITEMS.map((item, i) => (
+                <label key={item.key} style={{
+                  display: "flex", alignItems: "center", gap: "10px", padding: "9px 0",
+                  borderBottom: i < CHECKLIST_ITEMS.length - 1 ? "1px solid var(--border)" : "none",
+                  cursor: "pointer", fontSize: "13px", color: "var(--ink)",
+                }}>
+                  <input
+                    type="checkbox"
+                    checked={checklist[item.key]}
+                    onChange={(e) => setChecklist((c) => ({ ...c, [item.key]: e.target.checked }))}
+                    style={{ width: "16px", height: "16px", flexShrink: 0, accentColor: "var(--teal)" }}
+                  />
+                  {item.label}
+                </label>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedZone && checklistComplete && (
           <div style={{
             marginTop: "14px", fontSize: "12px", color: "var(--gold)", background: "rgba(184,134,59,0.10)",
             borderRadius: "8px", padding: "10px 12px",
@@ -380,13 +418,13 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
             Cancel
           </button>
           <button
-            disabled={!selectedZone || activating}
-            onClick={() => selectedZone && onActivate(submission, selectedZone)}
+            disabled={!selectedZone || !checklistComplete || activating}
+            onClick={() => selectedZone && checklistComplete && onActivate(submission, selectedZone)}
             style={{
               padding: "9px 18px", borderRadius: "8px", border: "none",
-              background: selectedZone ? "var(--plum)" : "var(--border)",
-              color: selectedZone ? "#fff" : "var(--ink-muted)",
-              fontSize: "13.5px", fontWeight: 600, cursor: selectedZone && !activating ? "pointer" : "not-allowed",
+              background: (selectedZone && checklistComplete) ? "var(--plum)" : "var(--border)",
+              color: (selectedZone && checklistComplete) ? "#fff" : "var(--ink-muted)",
+              fontSize: "13.5px", fontWeight: 600, cursor: (selectedZone && checklistComplete && !activating) ? "pointer" : "not-allowed",
             }}
           >
             {activating ? "Activating…" : "Activate Bethel"}
