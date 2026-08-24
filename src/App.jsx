@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
 import {
   Home, Inbox, Users, BarChart3, MapPin, Search, Check, X,
   ChevronRight, Phone, AlertCircle, Sparkles, Plus, RefreshCw,
@@ -1686,6 +1687,24 @@ const NAV = [
 ];
 
 export default function BethelAdminPortal() {
+  return (
+    <>
+      <SignedOut>
+        <div style={{
+          minHeight: "600px", display: "flex", alignItems: "center", justifyContent: "center",
+          background: "#FAF6EF", borderRadius: "12px", border: "1px solid #E4DACB",
+        }}>
+          <SignIn />
+        </div>
+      </SignedOut>
+      <SignedIn>
+        <BethelAdminPortalInner />
+      </SignedIn>
+    </>
+  );
+}
+
+function BethelAdminPortalInner() {
   const [view, setView] = useState("dashboard");
   const [zones, setZones] = useState([]);
   const [submissions, setSubmissions] = useState([]);
@@ -1853,6 +1872,10 @@ export default function BethelAdminPortal() {
         }}>
           <RefreshCw size={13} /> Refresh from Supabase
         </button>
+        <div style={{ marginTop: "14px", display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px" }}>
+          <UserButton afterSignOutUrl="/" />
+          <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Signed in</span>
+        </div>
       </aside>
 
       <main style={{ flex: 1, padding: "28px 32px", overflowY: "auto", maxHeight: "700px" }}>
