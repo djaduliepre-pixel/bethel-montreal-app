@@ -1852,6 +1852,13 @@ function finSemaineCourante() {
   return debut.toISOString().slice(0, 10);
 }
 
+function datesDuTrimestre(trimestre, annee) {
+  const moisDebut = (trimestre - 1) * 3;
+  const debut = new Date(annee, moisDebut, 1);
+  const fin = new Date(annee, moisDebut + 3, 0); // dernier jour du 3e mois du trimestre
+  return { debut: debut.toISOString().slice(0, 10), fin: fin.toISOString().slice(0, 10) };
+}
+
 function normaliseNom(s) {
   return String(s || "").trim().toLowerCase().replace(/[^a-zàâäéèêëïîôöùûüç\s]/gi, "");
 }
@@ -1939,18 +1946,40 @@ function analyserTexteWhatsApp(texte) {
 
 function AddDevotionManualPanel({ onAdded }) {
   const [open, setOpen] = useState(false);
-  const [prenom, setPrenom] = useState("");
-  const [nom, setNom] = useState("");
+  const [recherche, setRecherche] = useState("");
+  const [resultats, setResultats] = useState([]);
+  const [chercheEnCours, setChercheEnCours] = useState(false);
+  const [membreChoisi, setMembreChoisi] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState(null);
 
+  useEffect(() => {
+    const q = recherche.trim();
+    if (q.length < 2 || membreChoisi) { setResultats([]); return; }
+    setChercheEnCours(true);
+    const minuteur = setTimeout(async () => {
+      try {
+        const data = await supaGet(
+          "members",
+          `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*)&status=eq.active&order=first_name.asc&limit=15`
+        );
+        setResultats(data);
+      } catch (e) {
+        setResultats([]);
+      } finally {
+        setChercheEnCours(false);
+      }
+    }, 300);
+    return () => clearTimeout(minuteur);
+  }, [recherche, membreChoisi]);
+
   async function ajouter() {
-    if (!prenom.trim() || !nom.trim()) return;
+    if (!membreChoisi) return;
     setBusy(true);
     setMessage(null);
     try {
-      const submitter = `${prenom.trim()} ${nom.trim()}`;
+      const submitter = `${membreChoisi.first_name} ${membreChoisi.last_name}`;
       const existantes = await supaGet(
         "devotions",
         `submitter_name=ilike.${encodeURIComponent(submitter)}&devotion_date=eq.${date}&select=devotion_id`
@@ -1965,7 +1994,7 @@ function AddDevotionManualPanel({ onAdded }) {
         devotion_date: date, raw_snippet: "Added manually via portal",
       });
       setMessage({ type: "ok", text: `Added: ${submitter} — ${date}` });
-      setPrenom(""); setNom("");
+      setMembreChoisi(null); setRecherche("");
       onAdded();
     } catch (e) {
       setMessage({ type: "error", text: e.message });
@@ -1996,15 +2025,62 @@ function AddDevotionManualPanel({ onAdded }) {
         <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Add a devotion manually</span>
         <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
       </div>
-      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
-        <input placeholder="First name" value={prenom} onChange={(e) => setPrenom(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
-        <input placeholder="Last name" value={nom} onChange={(e) => setNom(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
+
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ position: "relative", width: "260px" }}>
+          {membreChoisi ? (
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "7px 10px", border: "1px solid var(--plum)", borderRadius: "6px", background: "rgba(107,42,62,0.06)",
+            }}>
+              <span style={{ fontSize: "12.5px", color: "var(--ink)", fontWeight: 600 }}>
+                {membreChoisi.first_name} {membreChoisi.last_name}
+              </span>
+              <button onClick={() => { setMembreChoisi(null); setRecherche(""); }} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}>
+                <X size={13} />
+              </button>
+            </div>
+          ) : (
+            <>
+              <input
+                placeholder="Type a name to search…"
+                value={recherche}
+                onChange={(e) => setRecherche(e.target.value)}
+                style={{ ...inputStyle, width: "100%", boxSizing: "border-box" }}
+              />
+              {(resultats.length > 0 || chercheEnCours) && (
+                <div style={{
+                  position: "absolute", top: "34px", left: 0, right: 0, zIndex: 20,
+                  border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface)",
+                  boxShadow: "0 8px 20px rgba(36,30,24,0.12)", maxHeight: "220px", overflowY: "auto",
+                }}>
+                  {chercheEnCours && <div style={{ padding: "8px 10px", fontSize: "12px", color: "var(--ink-muted)" }}>Searching…</div>}
+                  {resultats.map((m) => (
+                    <button
+                      key={m.member_id}
+                      onClick={() => { setMembreChoisi(m); setResultats([]); }}
+                      style={{
+                        display: "block", width: "100%", textAlign: "left", padding: "8px 10px",
+                        border: "none", borderBottom: "1px solid var(--border)", background: "var(--surface)",
+                        cursor: "pointer", fontSize: "12.5px", fontFamily: "var(--font-body)",
+                      }}
+                    >
+                      <span style={{ color: "var(--ink)" }}>{m.first_name} {m.last_name}</span>
+                      <span style={{ color: "var(--ink-muted)", marginLeft: "6px", fontSize: "11px" }}>{m.role}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
         <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
-        <button disabled={busy || !prenom.trim() || !nom.trim()} onClick={ajouter} style={{
+        <button disabled={busy || !membreChoisi} onClick={ajouter} style={{
           padding: "7px 16px", borderRadius: "6px", border: "none",
-          background: (prenom.trim() && nom.trim()) ? "var(--plum)" : "var(--border)",
-          color: (prenom.trim() && nom.trim()) ? "#fff" : "var(--ink-muted)", fontSize: "12.5px", fontWeight: 600,
-          cursor: (prenom.trim() && nom.trim() && !busy) ? "pointer" : "not-allowed",
+          background: membreChoisi ? "var(--plum)" : "var(--border)",
+          color: membreChoisi ? "#fff" : "var(--ink-muted)", fontSize: "12.5px", fontWeight: 600,
+          cursor: (membreChoisi && !busy) ? "pointer" : "not-allowed",
         }}>
           {busy ? "Adding…" : "Add"}
         </button>
@@ -2133,9 +2209,10 @@ function PersonDevotionModal({ membre, onClose }) {
         );
         const filtre = large.filter((d) => {
           const mots = new Set(normaliseNom(d.submitter_name).split(/\s+/).filter((w) => w.length > 1));
-          let communs = 0;
-          for (const w of mots) if (motsCible.has(w)) communs++;
-          return communs >= 1;
+          // Exige que TOUS les mots du nom cible soient présents (prénom ET nom),
+          // pas juste un seul -- évite de mélanger "Judeline Nicolas" et "Nicolas Rameau".
+          for (const w of motsCible) if (!mots.has(w)) return false;
+          return motsCible.size > 0;
         });
         setDevotions(filtre);
       } catch (e) {
@@ -2248,13 +2325,17 @@ function DevotionsView() {
 
     function trouveMembreParNom(nomSoumis) {
       const mots = new Set(normaliseNom(nomSoumis).split(/\s+/).filter((w) => w.length > 1));
+      // Si le nom soumis a prénom + nom (2 mots ou plus), exige au moins 2 mots en commun
+      // pour éviter qu'un seul nom de famille partagé ne fasse matcher la mauvaise personne
+      // (ex: "Nicolas Rameau" ne doit jamais correspondre à "Judeline Nicolas").
+      const seuilRequis = mots.size >= 2 ? 2 : 1;
       let meilleur = null, meilleurScore = 0;
       for (const m of membresAvecCle) {
         let communs = 0;
         for (const w of mots) if (m.motsNom.has(w)) communs++;
         if (communs > meilleurScore) { meilleurScore = communs; meilleur = m; }
       }
-      return meilleurScore >= 1 ? meilleur : null;
+      return meilleurScore >= seuilRequis ? meilleur : null;
     }
 
     // Pour chaque rôle : liste des membres, et le sous-ensemble ayant soumis
@@ -2326,6 +2407,17 @@ function DevotionsView() {
         }}>
           This week
         </button>
+        {[1, 2, 3, 4].map((t) => (
+          <button key={t} onClick={() => {
+            const { debut, fin } = datesDuTrimestre(t, new Date().getFullYear());
+            setDateDebut(debut); setDateFin(fin);
+          }} style={{
+            padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)",
+            fontSize: "12px", color: "var(--ink-muted)", cursor: "pointer",
+          }}>
+            Q{t}
+          </button>
+        ))}
       </div>
 
       {loading ? (
