@@ -1840,15 +1840,17 @@ const NAV = [
 const OBJECTIF_DEVOTION = 0.8; // 80%, même cible que l'ancien système Excel
 
 function debutSemaineCourante() {
+  // La semaine de dévotion va du samedi au vendredi (pas lundi-dimanche).
   const d = new Date();
-  const jour = d.getDay(); // 0 = dimanche
-  const diff = d.getDate() - jour;
-  const lundi = new Date(d.setDate(diff + (jour === 0 ? -6 : 1)));
-  return lundi.toISOString().slice(0, 10);
+  const jour = d.getDay(); // 0=dimanche, 6=samedi
+  const decalage = (jour + 1) % 7; // nombre de jours depuis le dernier samedi
+  const samedi = new Date(d);
+  samedi.setDate(d.getDate() - decalage);
+  return samedi.toISOString().slice(0, 10);
 }
 function finSemaineCourante() {
-  const debut = new Date(debutSemaineCourante());
-  debut.setDate(debut.getDate() + 6);
+  const debut = new Date(debutSemaineCourante() + "T00:00:00");
+  debut.setDate(debut.getDate() + 6); // vendredi suivant
   return debut.toISOString().slice(0, 10);
 }
 
@@ -2394,30 +2396,29 @@ function DevotionsView() {
 
   // Grille hebdomadaire : pour chaque semaine (lundi à dimanche) de la période choisie,
   // qui a soumis au moins une fois -- l'équivalent fiable de l'onglet "SUIVI" de l'ancien fichier.
-  const { semaines, parSemaineParMembre } = useMemo(() => {
+  const { jours, parJourParMembre, scoreParMembre } = useMemo(() => {
+    // Liste chaque jour (pas semaine) entre dateDebut et dateFin -- comme l'onglet "SUIVI".
     const liste = [];
     let curseur = new Date(dateDebut + "T00:00:00");
-    const jourSemaine = curseur.getDay();
-    curseur.setDate(curseur.getDate() + (jourSemaine === 0 ? -6 : 1 - jourSemaine)); // recule jusqu'au lundi
     const finObj = new Date(dateFin + "T00:00:00");
     while (curseur <= finObj) {
       liste.push(curseur.toISOString().slice(0, 10));
-      curseur.setDate(curseur.getDate() + 7);
+      curseur.setDate(curseur.getDate() + 1);
     }
 
-    const map = {}; // member_id -> Set(lundi de la semaine)
+    const map = {}; // member_id -> Set(date exacte où soumis)
     devotions.forEach((d) => {
       const membre = trouveMembreParNomGlobal(d.submitter_name, members);
       if (!membre) return;
-      const dt = new Date(d.devotion_date + "T00:00:00");
-      const js = dt.getDay();
-      dt.setDate(dt.getDate() + (js === 0 ? -6 : 1 - js));
-      const lundiDeLaSemaine = dt.toISOString().slice(0, 10);
       map[membre.member_id] = map[membre.member_id] || new Set();
-      map[membre.member_id].add(lundiDeLaSemaine);
+      map[membre.member_id].add(d.devotion_date);
     });
 
-    return { semaines: liste, parSemaineParMembre: map };
+    // Score = nombre de jours distincts soumis dans la période (sur 7, si la période est 1 semaine)
+    const scores = {};
+    Object.entries(map).forEach(([id, set]) => { scores[id] = set.size; });
+
+    return { jours: liste, parJourParMembre: map, scoreParMembre: scores };
   }, [devotions, members, dateDebut, dateFin]);
 
   const ORDRE_ROLES = ['Bethel Leader', 'Ananias', 'Overseer', 'Ministre Ordonné', 'Assistant Pasteur', 'Pasteur', 'Membre'];
@@ -2570,41 +2571,53 @@ function DevotionsView() {
                         </>
                       )}
 
-                      {semaines.length > 1 && v.tousLesMembres.length > 0 && (
+                      {jours.length > 1 && v.tousLesMembres.length > 0 && (
                         <div style={{ marginTop: "16px", overflowX: "auto" }}>
                           <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "8px" }}>
-                            📅 Weekly breakdown
+                            📅 Daily breakdown — sorted by score
                           </div>
                           <table style={{ borderCollapse: "collapse", fontSize: "11px", whiteSpace: "nowrap" }}>
                             <thead>
                               <tr>
                                 <th style={{ textAlign: "left", padding: "4px 10px 4px 0", color: "var(--ink-muted)", position: "sticky", left: 0, background: "var(--bg)" }}>Name</th>
-                                {semaines.map((s) => (
-                                  <th key={s} style={{ padding: "4px 6px", color: "var(--ink-muted)", fontWeight: 600 }}>
-                                    {new Date(s + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                <th style={{ padding: "4px 8px", color: "var(--ink-muted)", fontWeight: 700 }}>Score</th>
+                                {jours.map((j) => (
+                                  <th key={j} style={{ padding: "4px 6px", color: "var(--ink-muted)", fontWeight: 600 }}>
+                                    {new Date(j + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", day: "numeric" })}
                                   </th>
                                 ))}
                               </tr>
                             </thead>
                             <tbody>
-                              {v.tousLesMembres.map((m) => (
-                                <tr key={m.member_id}>
-                                  <td style={{
-                                    padding: "3px 10px 3px 0", color: "var(--ink)", position: "sticky", left: 0,
-                                    background: "var(--bg)", cursor: "pointer", textDecoration: "underline", textDecorationColor: "var(--border)",
-                                  }} onClick={() => setPersonneOuverte(m)}>
-                                    {m.first_name} {m.last_name}
-                                  </td>
-                                  {semaines.map((s) => {
-                                    const aSoumis = parSemaineParMembre[m.member_id]?.has(s);
-                                    return (
-                                      <td key={s} style={{ padding: "3px 6px", textAlign: "center" }}>
-                                        <span style={{ color: aSoumis ? "var(--teal)" : "var(--border)" }}>{aSoumis ? "✓" : "·"}</span>
+                              {[...v.tousLesMembres]
+                                .sort((a, b) => (scoreParMembre[b.member_id] || 0) - (scoreParMembre[a.member_id] || 0))
+                                .map((m) => {
+                                  const score = scoreParMembre[m.member_id] || 0;
+                                  return (
+                                    <tr key={m.member_id}>
+                                      <td style={{
+                                        padding: "3px 10px 3px 0", color: "var(--ink)", position: "sticky", left: 0,
+                                        background: "var(--bg)", cursor: "pointer", textDecoration: "underline", textDecorationColor: "var(--border)",
+                                      }} onClick={() => setPersonneOuverte(m)}>
+                                        {m.first_name} {m.last_name}
                                       </td>
-                                    );
-                                  })}
-                                </tr>
-                              ))}
+                                      <td style={{
+                                        padding: "3px 8px", textAlign: "center", fontWeight: 700,
+                                        color: score >= 7 ? "var(--teal)" : score === 0 ? "var(--brick)" : "var(--gold)",
+                                      }}>
+                                        {score}/{jours.length}
+                                      </td>
+                                      {jours.map((j) => {
+                                        const aSoumis = parJourParMembre[m.member_id]?.has(j);
+                                        return (
+                                          <td key={j} style={{ padding: "3px 6px", textAlign: "center" }}>
+                                            <span style={{ color: aSoumis ? "var(--teal)" : "var(--border)" }}>{aSoumis ? "✓" : "·"}</span>
+                                          </td>
+                                        );
+                                      })}
+                                    </tr>
+                                  );
+                                })}
                             </tbody>
                           </table>
                         </div>
