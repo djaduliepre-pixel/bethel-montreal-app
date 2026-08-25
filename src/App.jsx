@@ -1901,32 +1901,36 @@ const MOIS_FR = {
 };
 
 function extraireVraieDateDevotion(corps, dateEnvoiRepli) {
-  // Cherche un champ "Date" DANS le texte (la vraie date de la dévotion,
-  // pas forcément la date d'envoi du message WhatsApp).
-  const mChamp = corps.match(/\*?Date\*?\.?\s*:?\s*([^\n\r]+)/i);
-  if (!mChamp) return dateEnvoiRepli;
-  const brut = mChamp[1].trim();
+  function essaieFormats(brut) {
+    let m = brut.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+    if (m) { const [, j, mo, an] = m; return `${an}-${mo.padStart(2, '0')}-${j.padStart(2, '0')}`; }
+    m = brut.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (m) { const [, an, mo, j] = m; return `${an}-${mo.padStart(2, '0')}-${j.padStart(2, '0')}`; }
+    m = brut.match(/(\d{1,2})(?:er)?\s+([a-zûéèà]+)\s+(\d{4})/i);
+    if (m) {
+      const [, j, moisTexte, an] = m;
+      const mo = MOIS_FR[moisTexte.toLowerCase()];
+      if (mo) return `${an}-${mo}-${j.padStart(2, '0')}`;
+    }
+    return null;
+  }
 
-  // Format numérique : 31-07-2026, 31/07/2026, 31.07.2026, avec ou sans "le"
-  let m = brut.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
-  if (m) {
-    const [, j, mo, an] = m;
-    return `${an}-${mo.padStart(2, '0')}-${j.padStart(2, '0')}`;
+  // 1) Cherche un champ "Date :" explicite dans le texte
+  const mChamp = corps.match(/\*?Date\*?\.?\s*:?\s*([^\n\r]+)/i);
+  if (mChamp) {
+    const trouve = essaieFormats(mChamp[1].trim());
+    if (trouve) return trouve;
   }
-  // Format AAAA-MM-JJ déjà bon
-  m = brut.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
-  if (m) {
-    const [, an, mo, j] = m;
-    return `${an}-${mo.padStart(2, '0')}-${j.padStart(2, '0')}`;
+
+  // 2) Repli : cherche une phrase du type "Dévotion du 20 Août 2026" ou "Dévotion 20 Août 2026"
+  // (utilisé par les gens qui rattrapent une dévotion en retard, sans champ "Date:" séparé).
+  const mPhrase = corps.match(/[ée]votion(?:\s+du)?\s+(\d{1,2}(?:er)?\s+[a-zûéèà]+\s+\d{4})/i);
+  if (mPhrase) {
+    const trouve = essaieFormats(mPhrase[1]);
+    if (trouve) return trouve;
   }
-  // Format texte : "31 juillet 2026", "1er août 2026"
-  m = brut.match(/(\d{1,2})(?:er)?\s+([a-zûéèà]+)\s+(\d{4})/i);
-  if (m) {
-    const [, j, moisTexte, an] = m;
-    const mo = MOIS_FR[moisTexte.toLowerCase()];
-    if (mo) return `${an}-${mo}-${j.padStart(2, '0')}`;
-  }
-  return dateEnvoiRepli; // si rien ne correspond, on garde la date d'envoi comme repli
+
+  return dateEnvoiRepli; // si rien ne correspond, on garde la date d'envoi comme dernier repli
 }
 
 function analyserTexteWhatsApp(texte) {
