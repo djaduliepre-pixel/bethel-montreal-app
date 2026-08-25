@@ -1852,11 +1852,22 @@ function finSemaineCourante() {
   return debut.toISOString().slice(0, 10);
 }
 
-function datesDuTrimestre(trimestre, annee) {
-  const moisDebut = (trimestre - 1) * 3;
-  const debut = new Date(annee, moisDebut, 1);
-  const fin = new Date(annee, moisDebut + 3, 0); // dernier jour du 3e mois du trimestre
+// Année fiscale personnalisée : Q1 = août-octobre, Q2 = novembre-janvier,
+// Q3 = février-avril, Q4 = mai-juillet. "anneeFiscale" est l'année où le Q1 commence
+// (ex: anneeFiscale=2026 -> Q1 va d'août 2026 à octobre 2026, Q2 chevauche jusqu'à janvier 2027).
+function datesDuTrimestre(trimestre, anneeFiscale) {
+  // Mois de départ de chaque trimestre, en mois écoulés depuis août (0=août, 1=sept, ... 11=juillet)
+  const moisDepuisAout = (trimestre - 1) * 3;
+  const debut = new Date(anneeFiscale, 7 + moisDepuisAout, 1); // 7 = août (index 0-based)
+  const fin = new Date(anneeFiscale, 7 + moisDepuisAout + 3, 0); // dernier jour, 3 mois plus tard
   return { debut: debut.toISOString().slice(0, 10), fin: fin.toISOString().slice(0, 10) };
+}
+
+// Détermine l'année fiscale en cours (celle où le prochain/actuel Q1 débute en août)
+function anneeFiscaleCourante() {
+  const auj = new Date();
+  const mois = auj.getMonth(); // 0=janvier ... 7=août
+  return mois >= 7 ? auj.getFullYear() : auj.getFullYear() - 1;
 }
 
 function normaliseNom(s) {
@@ -2409,7 +2420,7 @@ function DevotionsView() {
         </button>
         {[1, 2, 3, 4].map((t) => (
           <button key={t} onClick={() => {
-            const { debut, fin } = datesDuTrimestre(t, new Date().getFullYear());
+            const { debut, fin } = datesDuTrimestre(t, anneeFiscaleCourante());
             setDateDebut(debut); setDateFin(fin);
           }} style={{
             padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)",
