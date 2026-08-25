@@ -2257,6 +2257,7 @@ function PersonDevotionModal({ membre, onClose }) {
 
   const premiereDate = devotions.length ? devotions[devotions.length - 1].devotion_date : null;
   const derniereDate = devotions.length ? devotions[0].devotion_date : null;
+  const joursUniques = new Set(devotions.map((d) => d.devotion_date)).size;
 
   return (
     <div style={{
@@ -2283,9 +2284,15 @@ function PersonDevotionModal({ membre, onClose }) {
         {!loading && devotions.length > 0 && (
           <div style={{ display: "flex", gap: "18px", marginTop: "16px", paddingBottom: "16px", borderBottom: "1px solid var(--border)" }}>
             <div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: "26px", color: "var(--plum)" }}>{devotions.length}</div>
-              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Total logged</div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "26px", color: "var(--plum)" }}>{joursUniques}</div>
+              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Unique days</div>
             </div>
+            {joursUniques !== devotions.length && (
+              <div>
+                <div style={{ fontSize: "13px", color: "var(--gold)", fontWeight: 600, marginTop: "6px" }}>{devotions.length} entries</div>
+                <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>({devotions.length - joursUniques} duplicate{devotions.length - joursUniques > 1 ? "s" : ""})</div>
+              </div>
+            )}
             <div>
               <div style={{ fontSize: "13px", color: "var(--ink)", fontWeight: 600, marginTop: "6px" }}>{premiereDate}</div>
               <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>First</div>
