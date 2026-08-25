@@ -3,7 +3,7 @@ import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
 import {
   Home, Inbox, Users, BarChart3, MapPin, Search, Check, X,
   ChevronRight, Phone, AlertCircle, Sparkles, Plus, RefreshCw,
-  Edit2, ArrowRightLeft, Trash2,
+  Edit2, ArrowRightLeft, Trash2, BookOpen,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -1829,9 +1829,204 @@ const NAV = [
   { id: "submissions", label: "Submissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
   { id: "search", label: "Search Members", icon: Search },
+  { id: "devotions", label: "Devotions", icon: BookOpen },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "zones", label: "Zone Lookup", icon: MapPin },
 ];
+
+/* ------------------------------------------------------------------ */
+/* Vue : Suivi des dévotions quotidiennes, % de conformité vs objectif */
+/* ------------------------------------------------------------------ */
+const OBJECTIF_DEVOTION = 0.8; // 80%, même cible que l'ancien système Excel
+
+function debutSemaineCourante() {
+  const d = new Date();
+  const jour = d.getDay(); // 0 = dimanche
+  const diff = d.getDate() - jour;
+  const lundi = new Date(d.setDate(diff + (jour === 0 ? -6 : 1)));
+  return lundi.toISOString().slice(0, 10);
+}
+function finSemaineCourante() {
+  const debut = new Date(debutSemaineCourante());
+  debut.setDate(debut.getDate() + 6);
+  return debut.toISOString().slice(0, 10);
+}
+
+function normaliseNom(s) {
+  return String(s || "").trim().toLowerCase().replace(/[^a-zàâäéèêëïîôöùûüç\s]/gi, "");
+}
+
+function DevotionsView() {
+  const [dateDebut, setDateDebut] = useState(debutSemaineCourante());
+  const [dateFin, setDateFin] = useState(finSemaineCourante());
+  const [devotions, setDevotions] = useState([]);
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [roleOuvert, setRoleOuvert] = useState(null);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const [devs, mems] = await Promise.all([
+          supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date`),
+          supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role"),
+        ]);
+        setDevotions(devs);
+        setMembers(mems);
+      } catch (e) {
+        setDevotions([]); setMembers([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [dateDebut, dateFin]);
+
+  const { parRole, nonApparies } = useMemo(() => {
+    // Prépare un index de membres par mots du nom, pour un rapprochement rapide
+    const membresAvecCle = members.map((m) => ({
+      ...m,
+      motsNom: new Set(normaliseNom(`${m.first_name} ${m.last_name}`).split(/\s+/).filter((w) => w.length > 1)),
+    }));
+
+    function trouveMembreParNom(nomSoumis) {
+      const mots = new Set(normaliseNom(nomSoumis).split(/\s+/).filter((w) => w.length > 1));
+      let meilleur = null, meilleurScore = 0;
+      for (const m of membresAvecCle) {
+        let communs = 0;
+        for (const w of mots) if (m.motsNom.has(w)) communs++;
+        if (communs > meilleurScore) { meilleurScore = communs; meilleur = m; }
+      }
+      return meilleurScore >= 1 ? meilleur : null;
+    }
+
+    // Pour chaque rôle : membres actifs total, et ceux qui ont soumis au moins 1 fois dans la période
+    const parRole = {};
+    members.forEach((m) => {
+      const role = m.role || "Membre";
+      parRole[role] = parRole[role] || { total: 0, aSoumis: new Set() };
+      parRole[role].total++;
+    });
+
+    const nonApparies = [];
+    const dejaCompte = new Set(); // évite de compter 2x le même membre pour le même rôle
+
+    devotions.forEach((d) => {
+      const membre = trouveMembreParNom(d.submitter_name);
+      if (!membre) { nonApparies.push(d.submitter_name); return; }
+      const role = membre.role || "Membre";
+      if (!parRole[role]) parRole[role] = { total: 0, aSoumis: new Set() };
+      parRole[role].aSoumis.add(membre.member_id);
+    });
+
+    return { parRole, nonApparies: [...new Set(nonApparies)] };
+  }, [devotions, members]);
+
+  const ORDRE_ROLES = ['Bethel Leader', 'Ananias', 'Overseer', 'Ministre Ordonné', 'Assistant Pasteur', 'Pasteur', 'Membre'];
+  const rolesTries = Object.keys(parRole).sort((a, b) => {
+    const ia = ORDRE_ROLES.indexOf(a); const ib = ORDRE_ROLES.indexOf(b);
+    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+  });
+
+  const totalMembres = Object.values(parRole).reduce((s, v) => s + v.total, 0);
+  const totalSoumis = Object.values(parRole).reduce((s, v) => s + v.aSoumis.size, 0);
+  const pctGlobal = totalMembres ? totalSoumis / totalMembres : 0;
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Devotions</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
+        Weekly devotion compliance vs {Math.round(OBJECTIF_DEVOTION * 100)}% goal, by role.
+      </p>
+
+      <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "20px", flexWrap: "wrap" }}>
+        <label style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>
+          From <input type="date" value={dateDebut} onChange={(e) => setDateDebut(e.target.value)}
+            style={{ marginLeft: "6px", padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px" }} />
+        </label>
+        <label style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>
+          To <input type="date" value={dateFin} onChange={(e) => setDateFin(e.target.value)}
+            style={{ marginLeft: "6px", padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px" }} />
+        </label>
+        <button onClick={() => { setDateDebut(debutSemaineCourante()); setDateFin(finSemaineCourante()); }} style={{
+          padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)",
+          fontSize: "12px", color: "var(--ink-muted)", cursor: "pointer",
+        }}>
+          This week
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
+      ) : (
+        <>
+          <div style={{
+            border: "1px solid var(--border)", borderRadius: "10px", padding: "20px 22px",
+            background: "var(--surface)", marginBottom: "18px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>
+                Overall compliance
+              </span>
+              <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Goal: {Math.round(OBJECTIF_DEVOTION * 100)}%</span>
+            </div>
+            <div style={{
+              fontFamily: "var(--font-display)", fontSize: "40px", marginTop: "4px",
+              color: pctGlobal >= OBJECTIF_DEVOTION ? "var(--teal)" : "var(--brick)",
+            }}>
+              {Math.round(pctGlobal * 100)}%
+            </div>
+            <div style={{ height: "10px", background: "var(--bg)", borderRadius: "999px", overflow: "hidden", marginTop: "8px", position: "relative" }}>
+              <div style={{ width: `${Math.min(100, pctGlobal * 100)}%`, height: "100%", background: pctGlobal >= OBJECTIF_DEVOTION ? "var(--teal)" : "var(--brick)" }} />
+              <div style={{ position: "absolute", left: `${OBJECTIF_DEVOTION * 100}%`, top: 0, bottom: 0, width: "2px", background: "var(--ink)" }} />
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "6px" }}>
+              {totalSoumis} of {totalMembres} active members submitted at least one devotion in this period.
+            </div>
+          </div>
+
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "20px", background: "var(--surface)" }}>
+            {rolesTries.map((role) => {
+              const v = parRole[role];
+              const pct = v.total ? v.aSoumis.size / v.total : 0;
+              const ok = pct >= OBJECTIF_DEVOTION;
+              return (
+                <div key={role} style={{ marginBottom: "16px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", marginBottom: "5px" }}>
+                    <span style={{ color: "var(--ink)", fontWeight: 600 }}>{role}</span>
+                    <span style={{ color: ok ? "var(--teal)" : "var(--brick)", fontWeight: 600 }}>
+                      {v.aSoumis.size} / {v.total} ({Math.round(pct * 100)}%)
+                    </span>
+                  </div>
+                  <div style={{ height: "8px", background: "var(--bg)", borderRadius: "999px", overflow: "hidden", position: "relative" }}>
+                    <div style={{ width: `${Math.min(100, pct * 100)}%`, height: "100%", background: ok ? "var(--teal)" : "var(--brick)" }} />
+                    <div style={{ position: "absolute", left: `${OBJECTIF_DEVOTION * 100}%`, top: 0, bottom: 0, width: "1.5px", background: "var(--ink-muted)", opacity: 0.5 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {nonApparies.length > 0 && (
+            <div style={{ marginTop: "18px" }}>
+              <button onClick={() => setRoleOuvert(roleOuvert === "unmatched" ? null : "unmatched")} style={{
+                background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)",
+                fontSize: "12.5px", padding: 0, textDecoration: "underline",
+              }}>
+                {roleOuvert === "unmatched" ? "Hide" : "Show"} {nonApparies.length} unmatched submitter name(s)
+              </button>
+              {roleOuvert === "unmatched" && (
+                <div style={{ marginTop: "8px", fontSize: "12px", color: "var(--ink-muted)", lineHeight: 1.8 }}>
+                  {nonApparies.join(", ")}
+                </div>
+              )}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
 
 export default function BethelAdminPortal() {
   return (
@@ -2049,6 +2244,7 @@ function BethelAdminPortalInner() {
             )}
             {view === "bethels" && <BethelsView bethels={bethels} onOpenDetail={setDetailFor} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
+            {view === "devotions" && <DevotionsView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
