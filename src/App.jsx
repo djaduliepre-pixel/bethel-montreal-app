@@ -1937,6 +1937,87 @@ function analyserTexteWhatsApp(texte) {
   return messages;
 }
 
+function AddDevotionManualPanel({ onAdded }) {
+  const [open, setOpen] = useState(false);
+  const [prenom, setPrenom] = useState("");
+  const [nom, setNom] = useState("");
+  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  async function ajouter() {
+    if (!prenom.trim() || !nom.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const submitter = `${prenom.trim()} ${nom.trim()}`;
+      const existantes = await supaGet(
+        "devotions",
+        `submitter_name=ilike.${encodeURIComponent(submitter)}&devotion_date=eq.${date}&select=devotion_id`
+      );
+      if (existantes.length > 0) {
+        setMessage({ type: "warn", text: `Already logged for ${submitter} on ${date}.` });
+        setBusy(false);
+        return;
+      }
+      await supaPost("devotions", {
+        submitter_name: submitter, name_confidence: "declared",
+        devotion_date: date, raw_snippet: "Added manually via portal",
+      });
+      setMessage({ type: "ok", text: `Added: ${submitter} — ${date}` });
+      setPrenom(""); setNom("");
+      onAdded();
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{
+        display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px",
+        border: "1px solid var(--border)", background: "transparent", color: "var(--ink-muted)", fontSize: "13px",
+        fontWeight: 600, cursor: "pointer",
+      }}>
+        <Plus size={14} /> Add manually
+      </button>
+    );
+  }
+
+  const inputStyle = {
+    padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px",
+  };
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "18px", background: "var(--surface)", marginBottom: "18px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+        <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Add a devotion manually</span>
+        <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
+      </div>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+        <input placeholder="First name" value={prenom} onChange={(e) => setPrenom(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
+        <input placeholder="Last name" value={nom} onChange={(e) => setNom(e.target.value)} style={{ ...inputStyle, width: "140px" }} />
+        <input type="date" value={date} onChange={(e) => setDate(e.target.value)} style={inputStyle} />
+        <button disabled={busy || !prenom.trim() || !nom.trim()} onClick={ajouter} style={{
+          padding: "7px 16px", borderRadius: "6px", border: "none",
+          background: (prenom.trim() && nom.trim()) ? "var(--plum)" : "var(--border)",
+          color: (prenom.trim() && nom.trim()) ? "#fff" : "var(--ink-muted)", fontSize: "12.5px", fontWeight: 600,
+          cursor: (prenom.trim() && nom.trim() && !busy) ? "pointer" : "not-allowed",
+        }}>
+          {busy ? "Adding…" : "Add"}
+        </button>
+      </div>
+      {message && (
+        <div style={{ marginTop: "8px", fontSize: "12px", color: message.type === "ok" ? "var(--teal)" : message.type === "warn" ? "var(--gold)" : "var(--brick)" }}>
+          {message.type === "ok" ? "✓ " : "⚠️ "}{message.text}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ImportDevotionsPanel({ onImported }) {
   const [open, setOpen] = useState(false);
   const [texte, setTexte] = useState("");
@@ -2126,7 +2207,10 @@ function DevotionsView() {
         </div>
       </div>
 
-      <ImportDevotionsPanel onImported={recharger} />
+      <div style={{ display: "flex", gap: "8px", marginBottom: "18px" }}>
+        <ImportDevotionsPanel onImported={recharger} />
+        <AddDevotionManualPanel onAdded={recharger} />
+      </div>
 
       <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "20px", flexWrap: "wrap" }}>
         <label style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>
