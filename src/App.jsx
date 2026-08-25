@@ -227,7 +227,40 @@ const ZONE_PAR_FSA = {
   'H7S':'Laval Chomedey','H7T':'Laval Chomedey','H7V':'Laval Chomedey','H7W':'Laval Chomedey',
   'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny',
   'J6X':'Terrebonne Terrebonne','J6Y':'Terrebonne Terrebonne','J6V':'Terrebonne Terrebonne','J6W':'Terrebonne Terrebonne','J7M':'Terrebonne Terrebonne',
+  'J7K':'Mascouche Mascouche','J7L':'Mascouche Mascouche',
+  'J6E':'Repentigny Repentigny', // L'Assomption/région -- meilleure approximation dispo
+  'J6N':'Laval Auteuil', // Sainte-Thérèse/Blainville, proche Laval
   'G8':'Trois-Rivières Trois-Rivières','G9':'Trois-Rivières Trois-Rivières',
+  'G0X':'Trois-Rivières Shawinigan',
+  'G1V':'Région Sainte-Foy–Sillery–Cap-Rouge','G1W':'Région Sainte-Foy–Sillery–Cap-Rouge',
+  'G1S':'Région Sainte-Foy–Sillery–Cap-Rouge','G1T':'Région Sainte-Foy–Sillery–Cap-Rouge',
+  'G1K':'Région La Cité-Limoilou','G1L':'Région La Cité-Limoilou','G1J':'Région La Cité-Limoilou',
+  'G1N':'Région Les Rivières','G1P':'Région Les Rivières','G1G':'Région Les Rivières','G1H':'Région Les Rivières',
+  'G1C':'Région Beauport','G1E':'Région Beauport',
+  'G2A':'Région Charlesbourg','G2B':'Région Charlesbourg','G2C':'Région Charlesbourg','G2N':'Région Charlesbourg',
+  'J1E':'Sherbrooke Fleurimont','J1G':'Sherbrooke Fleurimont','J1H':'Sherbrooke Mont-Bellevue',
+  'J1J':'Sherbrooke Jacques-Cartier','J1K':'Sherbrooke Lennoxville','J1L':'Sherbrooke Rock Forest–Saint-Élie–Deauville',
+  'J1N':'Sherbrooke Brompton','J1C':'Sherbrooke Fleurimont',
+  // Régions rurales du Québec sans zone d\u00e9taill\u00e9e -- rep\u00e8re g\u00e9n\u00e9ral seulement
+  'G6':'Repentigny Repentigny', // Bellechasse/Lévis, direction générale la plus proche
+  'J8':'Sherbrooke Fleurimont', 'J9':'Sherbrooke Fleurimont',
+  'J0':'Repentigny Repentigny', // codes ruraux J0xxxx, très variés -- vérifier manuellement
+  // Winnipeg / Manitoba
+  'R2K':'Winnipeg North Kildonan','R2G':'Winnipeg North End','R2W':'Winnipeg North End',
+  'R3C':'Winnipeg City Centre (Centre-ville)','R3B':'Winnipeg City Centre (Centre-ville)',
+  'R2H':'Winnipeg St. Boniface (secteur francophone)','R2M':'Winnipeg St. Boniface (secteur francophone)',
+  'R2M2':'Winnipeg St. Vital','R3T':'Winnipeg Fort Garry','R3M':'Winnipeg River Heights',
+  'R3J':'Winnipeg St. James-Assiniboia','R3G':'Winnipeg West End','R2C':'Winnipeg Transcona',
+  'R':'Manitoba (hors Winnipeg)', // repli très large pour tout le Manitoba non couvert ci-dessus
+  // New-Brunswick
+  'E1A':'New-Brunswick Moncton','E1C':'New-Brunswick Moncton','E1G':'New-Brunswick Dieppe',
+  'E1B':'New-Brunswick Riverview','E3B':'New-Brunswick Fredericton','E2L':'New-Brunswick Saint John',
+  'E3L':'New-Brunswick Edmundston','E':'New-Brunswick Moncton', // repli large
+  // Alberta
+  'T2P':'Alberta Calgary Downtown','T2G':'Alberta Calgary Downtown','T2E':'Alberta Calgary Nord-Est',
+  'T2A':'Alberta Calgary Sud-Est','T2J':'Alberta Calgary Sud-Est','T2V':'Alberta Calgary Sud-Ouest',
+  'T2W':'Alberta Calgary Sud-Ouest','T5J':'Alberta Edmonton Downtown','T6L':'Alberta Mill Woods',
+  'T5T':'Alberta West Edmonton','T8N':'Alberta St. Albert','T':'Alberta Calgary Downtown', // repli large
 };
 
 function suggererZoneDepuisAdresse(adresse) {
@@ -235,7 +268,8 @@ function suggererZoneDepuisAdresse(adresse) {
   const m = adresse.match(/([A-Za-z]\d[A-Za-z])\s?\d[A-Za-z]\d/);
   if (!m) return null;
   const fsa = m[1].toUpperCase();
-  return ZONE_PAR_FSA[fsa] || ZONE_PAR_FSA[fsa.slice(0, 2)] || null;
+  // Essaie du plus précis (3 caractères) au moins précis (1re lettre = province)
+  return ZONE_PAR_FSA[fsa] || ZONE_PAR_FSA[fsa.slice(0, 2)] || ZONE_PAR_FSA[fsa.slice(0, 1)] || null;
 }
 
 function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
