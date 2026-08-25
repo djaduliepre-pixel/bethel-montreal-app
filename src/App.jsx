@@ -2004,7 +2004,7 @@ function DevotionsView() {
     try {
       const [devs, mems] = await Promise.all([
         supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date`),
-        supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role"),
+        supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone"),
       ]);
       setDevotions(devs);
       setMembers(mems);
@@ -2035,23 +2035,29 @@ function DevotionsView() {
       return meilleurScore >= 1 ? meilleur : null;
     }
 
-    // Pour chaque rôle : membres actifs total, et ceux qui ont soumis au moins 1 fois dans la période
+    // Pour chaque rôle : liste des membres, et le sous-ensemble ayant soumis
     const parRole = {};
     members.forEach((m) => {
       const role = m.role || "Membre";
-      parRole[role] = parRole[role] || { total: 0, aSoumis: new Set() };
-      parRole[role].total++;
+      parRole[role] = parRole[role] || { tousLesMembres: [], aSoumisIds: new Set() };
+      parRole[role].tousLesMembres.push(m);
     });
 
     const nonApparies = [];
-    const dejaCompte = new Set(); // évite de compter 2x le même membre pour le même rôle
 
     devotions.forEach((d) => {
       const membre = trouveMembreParNom(d.submitter_name);
       if (!membre) { nonApparies.push(d.submitter_name); return; }
       const role = membre.role || "Membre";
-      if (!parRole[role]) parRole[role] = { total: 0, aSoumis: new Set() };
-      parRole[role].aSoumis.add(membre.member_id);
+      if (!parRole[role]) parRole[role] = { tousLesMembres: [], aSoumisIds: new Set() };
+      parRole[role].aSoumisIds.add(membre.member_id);
+    });
+
+    // Ajoute des champs pratiques : total, manquants (avec téléphone), et ceux qui ont soumis
+    Object.values(parRole).forEach((v) => {
+      v.total = v.tousLesMembres.length;
+      v.manquants = v.tousLesMembres.filter((m) => !v.aSoumisIds.has(m.member_id));
+      v.ontSoumis = v.tousLesMembres.filter((m) => v.aSoumisIds.has(m.member_id));
     });
 
     return { parRole, nonApparies: [...new Set(nonApparies)] };
@@ -2064,7 +2070,7 @@ function DevotionsView() {
   });
 
   const totalMembres = Object.values(parRole).reduce((s, v) => s + v.total, 0);
-  const totalSoumis = Object.values(parRole).reduce((s, v) => s + v.aSoumis.size, 0);
+  const totalSoumis = Object.values(parRole).reduce((s, v) => s + v.ontSoumis.length, 0);
   const pctGlobal = totalMembres ? totalSoumis / totalMembres : 0;
 
   return (
@@ -2129,20 +2135,56 @@ function DevotionsView() {
           <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "20px", background: "var(--surface)" }}>
             {rolesTries.map((role) => {
               const v = parRole[role];
-              const pct = v.total ? v.aSoumis.size / v.total : 0;
+              const pct = v.total ? v.ontSoumis.length / v.total : 0;
               const ok = pct >= OBJECTIF_DEVOTION;
+              const estOuvert = roleOuvert === role;
               return (
                 <div key={role} style={{ marginBottom: "16px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", marginBottom: "5px" }}>
-                    <span style={{ color: "var(--ink)", fontWeight: 600 }}>{role}</span>
-                    <span style={{ color: ok ? "var(--teal)" : "var(--brick)", fontWeight: 600 }}>
-                      {v.aSoumis.size} / {v.total} ({Math.round(pct * 100)}%)
-                    </span>
-                  </div>
-                  <div style={{ height: "8px", background: "var(--bg)", borderRadius: "999px", overflow: "hidden", position: "relative" }}>
-                    <div style={{ width: `${Math.min(100, pct * 100)}%`, height: "100%", background: ok ? "var(--teal)" : "var(--brick)" }} />
-                    <div style={{ position: "absolute", left: `${OBJECTIF_DEVOTION * 100}%`, top: 0, bottom: 0, width: "1.5px", background: "var(--ink-muted)", opacity: 0.5 }} />
-                  </div>
+                  <button
+                    onClick={() => setRoleOuvert(estOuvert ? null : role)}
+                    style={{ display: "block", width: "100%", textAlign: "left", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                  >
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", marginBottom: "5px" }}>
+                      <span style={{ color: "var(--ink)", fontWeight: 600, display: "flex", alignItems: "center", gap: "5px" }}>
+                        {role} <ChevronRight size={12} style={{ transform: estOuvert ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+                      </span>
+                      <span style={{ color: ok ? "var(--teal)" : "var(--brick)", fontWeight: 600 }}>
+                        {v.ontSoumis.length} / {v.total} ({Math.round(pct * 100)}%)
+                      </span>
+                    </div>
+                    <div style={{ height: "8px", background: "var(--bg)", borderRadius: "999px", overflow: "hidden", position: "relative" }}>
+                      <div style={{ width: `${Math.min(100, pct * 100)}%`, height: "100%", background: ok ? "var(--teal)" : "var(--brick)" }} />
+                      <div style={{ position: "absolute", left: `${OBJECTIF_DEVOTION * 100}%`, top: 0, bottom: 0, width: "1.5px", background: "var(--ink-muted)", opacity: 0.5 }} />
+                    </div>
+                  </button>
+
+                  {estOuvert && (
+                    <div style={{ marginTop: "10px", padding: "12px", background: "var(--bg)", borderRadius: "8px" }}>
+                      {v.manquants.length > 0 && (
+                        <>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "8px" }}>
+                            📞 Missing — call for encouragement ({v.manquants.length})
+                          </div>
+                          {v.manquants.map((m) => (
+                            <div key={m.member_id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: "12.5px", borderBottom: "1px solid var(--border)" }}>
+                              <span style={{ color: "var(--ink)" }}>{m.first_name} {m.last_name}</span>
+                              <span style={{ color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{m.phone || "no phone"}</span>
+                            </div>
+                          ))}
+                        </>
+                      )}
+                      {v.ontSoumis.length > 0 && (
+                        <>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 8px" }}>
+                            ✓ Submitted ({v.ontSoumis.length})
+                          </div>
+                          <div style={{ fontSize: "12px", color: "var(--ink-muted)", lineHeight: 1.9 }}>
+                            {v.ontSoumis.map((m) => `${m.first_name} ${m.last_name}`).join(", ")}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
