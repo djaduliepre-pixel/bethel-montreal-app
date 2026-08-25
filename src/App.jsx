@@ -279,10 +279,10 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
     propre: false, prive: false, capacite: false, places: false,
   });
   const CHECKLIST_ITEMS = [
-    { key: "propre", label: "The home is clean and well-maintained" },
-    { key: "prive", label: "It is not an intimate space (not a bedroom, bathroom, or kitchen)" },
-    { key: "capacite", label: "Can comfortably accommodate at least 4 people" },
-    { key: "places", label: "Seating for at least 4 people" },
+    { key: "propre", label: "Le lieu est propre et bien entretenu" },
+    { key: "prive", label: "Ce n'est pas un espace intime (pas une chambre, une salle de bain ou une cuisine)" },
+    { key: "capacite", label: "Peut accueillir confortablement au moins 4 personnes" },
+    { key: "places", label: "Places assises pour au moins 4 personnes" },
   ];
   const checklistComplete = Object.values(checklist).every(Boolean);
 
@@ -411,10 +411,10 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
         {selectedZone && (
           <div style={{ marginTop: "18px" }}>
             <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>
-              Review checklist <span style={{ color: "var(--brick)" }}>*</span>
+              Liste de vérification <span style={{ color: "var(--brick)" }}>*</span>
             </label>
             <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "2px", marginBottom: "8px" }}>
-              Confirm each item before activating.
+              Confirme chaque point avant d'activer.
             </div>
             <div style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "4px 12px", background: "var(--bg)" }}>
               {CHECKLIST_ITEMS.map((item, i) => (
