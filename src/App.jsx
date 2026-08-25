@@ -1856,6 +1856,141 @@ function normaliseNom(s) {
   return String(s || "").trim().toLowerCase().replace(/[^a-zàâäéèêëïîôöùûüç\s]/gi, "");
 }
 
+// Analyse un texte exporté de WhatsApp et en extrait les dévotions valides
+// (même logique que le script utilisé pour l'import initial des 2094 dévotions).
+function analyserTexteWhatsApp(texte) {
+  const messages = [];
+  const regex = /\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\] ([^:]+): /g;
+  const positions = [];
+  let m;
+  while ((m = regex.exec(texte)) !== null) {
+    positions.push({ index: m.index, fin: regex.lastIndex, date: m[1], expediteur: m[3].trim() });
+  }
+  for (let i = 0; i < positions.length; i++) {
+    const debut = positions[i].fin;
+    const fin = i + 1 < positions.length ? positions[i + 1].index : texte.length;
+    const corps = texte.slice(debut, fin).trim();
+    if (!corps.toLowerCase().includes("évotion") || corps.length < 80) continue;
+
+    const mNom = corps.match(/\*?Nom(?:\s+de\s+famille)?\*?\s*:\s*([A-Za-zÀ-ÿ'\-]+)/i);
+    const mPrenom = corps.match(/\*?Pr[ée]nom\*?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|Campus|Minist[èe]re|$)/i);
+    const mCampus = corps.match(/\*?Campus\*?\s*:\s*([A-Za-zÀ-ÿ\s]+?)(?:\n|\r|Minist|$)/i);
+
+    let submitter = null, confidence = "whatsapp";
+    if (mNom && mPrenom) {
+      submitter = `${mPrenom[1].trim()} ${mNom[1].trim()}`;
+      confidence = "declared";
+    } else {
+      submitter = positions[i].expediteur.replace(/^[~\s]+/, "").trim();
+    }
+
+    messages.push({
+      submitter_name: submitter,
+      name_confidence: confidence,
+      devotion_date: positions[i].date,
+      campus_declared: mCampus ? mCampus[1].trim() : null,
+      raw_snippet: corps.slice(0, 150),
+    });
+  }
+  return messages;
+}
+
+function ImportDevotionsPanel({ onImported }) {
+  const [open, setOpen] = useState(false);
+  const [texte, setTexte] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [resultat, setResultat] = useState(null);
+
+  async function importer() {
+    setBusy(true);
+    setResultat(null);
+    try {
+      const trouvees = analyserTexteWhatsApp(texte);
+      if (trouvees.length === 0) {
+        setResultat({ ajoutees: 0, doublons: 0, total: 0 });
+        setBusy(false);
+        return;
+      }
+      // Vérifie les doublons déjà présents (même nom + même date)
+      const dates = [...new Set(trouvees.map((t) => t.devotion_date))];
+      const existantes = await supaGet(
+        "devotions",
+        `devotion_date=in.(${dates.join(",")})&select=submitter_name,devotion_date`
+      );
+      const dejaVues = new Set(existantes.map((e) => `${normaliseNom(e.submitter_name)}|${e.devotion_date}`));
+
+      const aInserer = trouvees.filter((t) => !dejaVues.has(`${normaliseNom(t.submitter_name)}|${t.devotion_date}`));
+      const doublons = trouvees.length - aInserer.length;
+
+      if (aInserer.length > 0) {
+        // Insère par petits lots pour rester fiable
+        for (let i = 0; i < aInserer.length; i += 200) {
+          await supaPost("devotions", aInserer.slice(i, i + 200));
+        }
+      }
+      setResultat({ ajoutees: aInserer.length, doublons, total: trouvees.length });
+      setTexte("");
+      onImported();
+    } catch (e) {
+      setResultat({ erreur: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{
+        display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px",
+        border: "1px solid var(--plum)", background: "transparent", color: "var(--plum)", fontSize: "13px",
+        fontWeight: 600, cursor: "pointer",
+      }}>
+        <Plus size={14} /> Import WhatsApp devotions
+      </button>
+    );
+  }
+
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "18px", background: "var(--surface)", marginBottom: "18px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+        <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Import WhatsApp devotions</span>
+        <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
+      </div>
+      <p style={{ fontSize: "12px", color: "var(--ink-muted)", margin: "0 0 10px" }}>
+        Paste the exported WhatsApp chat text below (or part of it). Already-imported devotions (same name + same date) are skipped automatically.
+      </p>
+      <textarea
+        value={texte}
+        onChange={(e) => setTexte(e.target.value)}
+        placeholder="Paste WhatsApp chat export text here…"
+        style={{
+          width: "100%", boxSizing: "border-box", minHeight: "160px", padding: "10px",
+          border: "1px solid var(--border)", borderRadius: "8px", fontSize: "12px",
+          fontFamily: "var(--font-mono)", resize: "vertical",
+        }}
+      />
+      <div style={{ display: "flex", gap: "8px", marginTop: "10px", alignItems: "center" }}>
+        <button disabled={busy || !texte.trim()} onClick={importer} style={{
+          padding: "8px 16px", borderRadius: "8px", border: "none",
+          background: texte.trim() ? "var(--plum)" : "var(--border)",
+          color: texte.trim() ? "#fff" : "var(--ink-muted)", fontSize: "13px", fontWeight: 600,
+          cursor: texte.trim() && !busy ? "pointer" : "not-allowed",
+        }}>
+          {busy ? "Importing…" : "Process & Import"}
+        </button>
+        {resultat && !resultat.erreur && (
+          <span style={{ fontSize: "12.5px", color: "var(--teal)" }}>
+            ✓ {resultat.ajoutees} added, {resultat.doublons} already existed ({resultat.total} found total)
+          </span>
+        )}
+        {resultat?.erreur && (
+          <span style={{ fontSize: "12.5px", color: "var(--brick)" }}>Error: {resultat.erreur}</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function DevotionsView() {
   const [dateDebut, setDateDebut] = useState(debutSemaineCourante());
   const [dateFin, setDateFin] = useState(finSemaineCourante());
@@ -1864,23 +1999,23 @@ function DevotionsView() {
   const [loading, setLoading] = useState(true);
   const [roleOuvert, setRoleOuvert] = useState(null);
 
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const [devs, mems] = await Promise.all([
-          supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date`),
-          supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role"),
-        ]);
-        setDevotions(devs);
-        setMembers(mems);
-      } catch (e) {
-        setDevotions([]); setMembers([]);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [dateDebut, dateFin]);
+  async function recharger() {
+    setLoading(true);
+    try {
+      const [devs, mems] = await Promise.all([
+        supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date`),
+        supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role"),
+      ]);
+      setDevotions(devs);
+      setMembers(mems);
+    } catch (e) {
+      setDevotions([]); setMembers([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { recharger(); }, [dateDebut, dateFin]);
 
   const { parRole, nonApparies } = useMemo(() => {
     // Prépare un index de membres par mots du nom, pour un rapprochement rapide
@@ -1934,10 +2069,16 @@ function DevotionsView() {
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Devotions</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
-        Weekly devotion compliance vs {Math.round(OBJECTIF_DEVOTION * 100)}% goal, by role.
-      </p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+        <div>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Devotions</h1>
+          <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
+            Weekly devotion compliance vs {Math.round(OBJECTIF_DEVOTION * 100)}% goal, by role.
+          </p>
+        </div>
+      </div>
+
+      <ImportDevotionsPanel onImported={recharger} />
 
       <div style={{ display: "flex", gap: "10px", alignItems: "center", marginBottom: "20px", flexWrap: "wrap" }}>
         <label style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>
