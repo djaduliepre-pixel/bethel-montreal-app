@@ -2114,6 +2114,104 @@ function ImportDevotionsPanel({ onImported }) {
   );
 }
 
+function PersonDevotionModal({ membre, onClose }) {
+  const [devotions, setDevotions] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        // Cherche large (par prénom OU nom), puis affine avec le même rapprochement par mots
+        const cible = normaliseNom(`${membre.first_name} ${membre.last_name}`);
+        const motsCible = new Set(cible.split(/\s+/).filter((w) => w.length > 1));
+        const prenomMot = motsCible.values().next().value || membre.first_name;
+
+        const large = await supaGet(
+          "devotions",
+          `submitter_name=ilike.*${encodeURIComponent(membre.last_name)}*&select=devotion_date,submitter_name,raw_snippet&order=devotion_date.desc`
+        );
+        const filtre = large.filter((d) => {
+          const mots = new Set(normaliseNom(d.submitter_name).split(/\s+/).filter((w) => w.length > 1));
+          let communs = 0;
+          for (const w of mots) if (motsCible.has(w)) communs++;
+          return communs >= 1;
+        });
+        setDevotions(filtre);
+      } catch (e) {
+        setDevotions([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [membre]);
+
+  const premiereDate = devotions.length ? devotions[devotions.length - 1].devotion_date : null;
+  const derniereDate = devotions.length ? devotions[0].devotion_date : null;
+
+  return (
+    <div style={{
+      position: "fixed", inset: 0, background: "rgba(36,30,24,0.5)",
+      display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: "20px",
+    }} onClick={onClose}>
+      <div style={{
+        background: "var(--surface)", borderRadius: "14px", width: "440px", maxWidth: "100%",
+        maxHeight: "80vh", display: "flex", flexDirection: "column",
+        padding: "26px", boxShadow: "0 24px 60px rgba(36,30,24,0.3)",
+      }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: 0, color: "var(--ink)" }}>
+              {membre.first_name} {membre.last_name}
+            </h2>
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "3px" }}>{membre.role}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", padding: "4px" }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        {!loading && devotions.length > 0 && (
+          <div style={{ display: "flex", gap: "18px", marginTop: "16px", paddingBottom: "16px", borderBottom: "1px solid var(--border)" }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "26px", color: "var(--plum)" }}>{devotions.length}</div>
+              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Total logged</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "13px", color: "var(--ink)", fontWeight: 600, marginTop: "6px" }}>{premiereDate}</div>
+              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>First</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "13px", color: "var(--ink)", fontWeight: 600, marginTop: "6px" }}>{derniereDate}</div>
+              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Most recent</div>
+            </div>
+          </div>
+        )}
+
+        <div style={{ marginTop: "14px", overflowY: "auto", flex: 1 }}>
+          {loading ? (
+            <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
+          ) : devotions.length === 0 ? (
+            <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>No devotions found for this person yet.</div>
+          ) : (
+            devotions.map((d, i) => (
+              <div key={i} style={{
+                display: "flex", flexDirection: "column", padding: "9px 0",
+                borderBottom: i < devotions.length - 1 ? "1px solid var(--border)" : "none",
+              }}>
+                <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{d.devotion_date}</span>
+                {d.raw_snippet && (
+                  <span style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "2px" }}>{d.raw_snippet.slice(0, 90)}…</span>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function DevotionsView() {
   const [dateDebut, setDateDebut] = useState(debutSemaineCourante());
   const [dateFin, setDateFin] = useState(finSemaineCourante());
@@ -2121,6 +2219,7 @@ function DevotionsView() {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [roleOuvert, setRoleOuvert] = useState(null);
+  const [personneOuverte, setPersonneOuverte] = useState(null);
 
   async function recharger() {
     setLoading(true);
@@ -2292,10 +2391,14 @@ function DevotionsView() {
                             📞 Missing — call for encouragement ({v.manquants.length})
                           </div>
                           {v.manquants.map((m) => (
-                            <div key={m.member_id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", fontSize: "12.5px", borderBottom: "1px solid var(--border)" }}>
-                              <span style={{ color: "var(--ink)" }}>{m.first_name} {m.last_name}</span>
+                            <button key={m.member_id} onClick={() => setPersonneOuverte(m)} style={{
+                              display: "flex", width: "100%", justifyContent: "space-between", padding: "5px 0",
+                              fontSize: "12.5px", borderBottom: "1px solid var(--border)", background: "none",
+                              border: "none", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-body)",
+                            }}>
+                              <span style={{ color: "var(--ink)", textDecoration: "underline", textDecorationColor: "var(--border)" }}>{m.first_name} {m.last_name}</span>
                               <span style={{ color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{m.phone || "no phone"}</span>
-                            </div>
+                            </button>
                           ))}
                         </>
                       )}
@@ -2305,7 +2408,18 @@ function DevotionsView() {
                             ✓ Submitted ({v.ontSoumis.length})
                           </div>
                           <div style={{ fontSize: "12px", color: "var(--ink-muted)", lineHeight: 1.9 }}>
-                            {v.ontSoumis.map((m) => `${m.first_name} ${m.last_name}`).join(", ")}
+                            {v.ontSoumis.map((m, idx) => (
+                              <span key={m.member_id}>
+                                <button onClick={() => setPersonneOuverte(m)} style={{
+                                  background: "none", border: "none", cursor: "pointer", padding: 0,
+                                  color: "var(--ink-muted)", textDecoration: "underline", textDecorationColor: "var(--border)",
+                                  fontSize: "12px", fontFamily: "var(--font-body)",
+                                }}>
+                                  {m.first_name} {m.last_name}
+                                </button>
+                                {idx < v.ontSoumis.length - 1 ? ", " : ""}
+                              </span>
+                            ))}
                           </div>
                         </>
                       )}
@@ -2332,6 +2446,10 @@ function DevotionsView() {
             </div>
           )}
         </>
+      )}
+
+      {personneOuverte && (
+        <PersonDevotionModal membre={personneOuverte} onClose={() => setPersonneOuverte(null)} />
       )}
     </div>
   );
