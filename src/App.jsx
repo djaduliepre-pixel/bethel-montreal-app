@@ -1911,7 +1911,8 @@ function analyserTexteWhatsApp(texte) {
     // Nom/Prénom peuvent apparaître dans n'importe quel ordre, et le nom de famille
     // peut avoir plusieurs mots (ex: "Paul Vilbrun") -- on cherche chaque champ
     // indépendamment, peu importe où il se trouve dans le texte.
-    const mNom = corps.match(/\*?Nom(?:\s+de\s+famille)?\*?\.?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|\*|Pr[ée]nom|Campus|Minist[èe]re|HP|$)/i);
+    // (?<![A-Za-zÀ-ÿ]) empêche de faire correspondre "nom" à l'intérieur du mot "Prénom"
+    const mNom = corps.match(/(?<![A-Za-zÀ-ÿ])\*?Nom(?:\s+de\s+famille)?\*?\.?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|\*|Pr[ée]nom|Campus|Minist[èe]re|HP|$)/i);
     const mPrenom = corps.match(/\*?Pr[ée]nom\*?\.?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|\*|Nom|Campus|Minist[èe]re|HP|$)/i);
     const mCampus = corps.match(/\*?Campus\*?\s*:\s*([A-Za-zÀ-ÿ\s]+?)(?:\n|\r|Minist|HP|$)/i);
 
