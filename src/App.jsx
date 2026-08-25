@@ -1858,6 +1858,42 @@ function normaliseNom(s) {
 
 // Analyse un texte exporté de WhatsApp et en extrait les dévotions valides
 // (même logique que le script utilisé pour l'import initial des 2094 dévotions).
+// Convertit une date écrite en français (plusieurs formats) en YYYY-MM-DD
+const MOIS_FR = {
+  'janvier': '01', 'février': '02', 'fevrier': '02', 'mars': '03', 'avril': '04',
+  'mai': '05', 'juin': '06', 'juillet': '07', 'août': '08', 'aout': '08',
+  'septembre': '09', 'octobre': '10', 'novembre': '11', 'décembre': '12', 'decembre': '12',
+};
+
+function extraireVraieDateDevotion(corps, dateEnvoiRepli) {
+  // Cherche un champ "Date" DANS le texte (la vraie date de la dévotion,
+  // pas forcément la date d'envoi du message WhatsApp).
+  const mChamp = corps.match(/\*?Date\*?\.?\s*:?\s*([^\n\r]+)/i);
+  if (!mChamp) return dateEnvoiRepli;
+  const brut = mChamp[1].trim();
+
+  // Format numérique : 31-07-2026, 31/07/2026, 31.07.2026, avec ou sans "le"
+  let m = brut.match(/(\d{1,2})[\/\-\.](\d{1,2})[\/\-\.](\d{4})/);
+  if (m) {
+    const [, j, mo, an] = m;
+    return `${an}-${mo.padStart(2, '0')}-${j.padStart(2, '0')}`;
+  }
+  // Format AAAA-MM-JJ déjà bon
+  m = brut.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) {
+    const [, an, mo, j] = m;
+    return `${an}-${mo.padStart(2, '0')}-${j.padStart(2, '0')}`;
+  }
+  // Format texte : "31 juillet 2026", "1er août 2026"
+  m = brut.match(/(\d{1,2})(?:er)?\s+([a-zûéèà]+)\s+(\d{4})/i);
+  if (m) {
+    const [, j, moisTexte, an] = m;
+    const mo = MOIS_FR[moisTexte.toLowerCase()];
+    if (mo) return `${an}-${mo}-${j.padStart(2, '0')}`;
+  }
+  return dateEnvoiRepli; // si rien ne correspond, on garde la date d'envoi comme repli
+}
+
 function analyserTexteWhatsApp(texte) {
   const messages = [];
   const regex = /\[(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2})\] ([^:]+): /g;
@@ -1872,9 +1908,12 @@ function analyserTexteWhatsApp(texte) {
     const corps = texte.slice(debut, fin).trim();
     if (!corps.toLowerCase().includes("évotion") || corps.length < 80) continue;
 
-    const mNom = corps.match(/\*?Nom(?:\s+de\s+famille)?\*?\s*:\s*([A-Za-zÀ-ÿ'\-]+)/i);
-    const mPrenom = corps.match(/\*?Pr[ée]nom\*?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|Campus|Minist[èe]re|$)/i);
-    const mCampus = corps.match(/\*?Campus\*?\s*:\s*([A-Za-zÀ-ÿ\s]+?)(?:\n|\r|Minist|$)/i);
+    // Nom/Prénom peuvent apparaître dans n'importe quel ordre, et le nom de famille
+    // peut avoir plusieurs mots (ex: "Paul Vilbrun") -- on cherche chaque champ
+    // indépendamment, peu importe où il se trouve dans le texte.
+    const mNom = corps.match(/\*?Nom(?:\s+de\s+famille)?\*?\.?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|\*|Pr[ée]nom|Campus|Minist[èe]re|HP|$)/i);
+    const mPrenom = corps.match(/\*?Pr[ée]nom\*?\.?\s*:\s*([A-Za-zÀ-ÿ'\-]+(?:\s+[A-Za-zÀ-ÿ'\-]+)?)\s*(?:\n|\r|\*|Nom|Campus|Minist[èe]re|HP|$)/i);
+    const mCampus = corps.match(/\*?Campus\*?\s*:\s*([A-Za-zÀ-ÿ\s]+?)(?:\n|\r|Minist|HP|$)/i);
 
     let submitter = null, confidence = "whatsapp";
     if (mNom && mPrenom) {
@@ -1884,10 +1923,12 @@ function analyserTexteWhatsApp(texte) {
       submitter = positions[i].expediteur.replace(/^[~\s]+/, "").trim();
     }
 
+    const vraieDate = extraireVraieDateDevotion(corps, positions[i].date);
+
     messages.push({
       submitter_name: submitter,
       name_confidence: confidence,
-      devotion_date: positions[i].date,
+      devotion_date: vraieDate,
       campus_declared: mCampus ? mCampus[1].trim() : null,
       raw_snippet: corps.slice(0, 150),
     });
