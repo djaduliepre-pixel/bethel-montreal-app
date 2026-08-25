@@ -1874,6 +1874,21 @@ function normaliseNom(s) {
   return String(s || "").trim().toLowerCase().replace(/[^a-zàâäéèêëïîôöùûüç\s]/gi, "");
 }
 
+// Rapproche un nom soumis dans une dévotion avec la bonne fiche membre, avec la même
+// règle stricte partout dans l'app (au moins 2 mots en commun si le nom en a 2+).
+function trouveMembreParNomGlobal(nomSoumis, listeMembres) {
+  const mots = new Set(normaliseNom(nomSoumis).split(/\s+/).filter((w) => w.length > 1));
+  const seuilRequis = mots.size >= 2 ? 2 : 1;
+  let meilleur = null, meilleurScore = 0;
+  for (const m of listeMembres) {
+    const motsNom = new Set(normaliseNom(`${m.first_name} ${m.last_name}`).split(/\s+/).filter((w) => w.length > 1));
+    let communs = 0;
+    for (const w of mots) if (motsNom.has(w)) communs++;
+    if (communs > meilleurScore) { meilleurScore = communs; meilleur = m; }
+  }
+  return meilleurScore >= seuilRequis ? meilleur : null;
+}
+
 // Analyse un texte exporté de WhatsApp et en extrait les dévotions valides
 // (même logique que le script utilisé pour l'import initial des 2094 dévotions).
 // Convertit une date écrite en français (plusieurs formats) en YYYY-MM-DD
@@ -2374,8 +2389,36 @@ function DevotionsView() {
       v.ontSoumis = v.tousLesMembres.filter((m) => v.aSoumisIds.has(m.member_id));
     });
 
-    return { parRole, nonApparies: [...new Set(nonApparies)] };
+    return { parRole, nonApparies: [...new Set(nonApparies)], trouveMembreParNom };
   }, [devotions, members]);
+
+  // Grille hebdomadaire : pour chaque semaine (lundi à dimanche) de la période choisie,
+  // qui a soumis au moins une fois -- l'équivalent fiable de l'onglet "SUIVI" de l'ancien fichier.
+  const { semaines, parSemaineParMembre } = useMemo(() => {
+    const liste = [];
+    let curseur = new Date(dateDebut + "T00:00:00");
+    const jourSemaine = curseur.getDay();
+    curseur.setDate(curseur.getDate() + (jourSemaine === 0 ? -6 : 1 - jourSemaine)); // recule jusqu'au lundi
+    const finObj = new Date(dateFin + "T00:00:00");
+    while (curseur <= finObj) {
+      liste.push(curseur.toISOString().slice(0, 10));
+      curseur.setDate(curseur.getDate() + 7);
+    }
+
+    const map = {}; // member_id -> Set(lundi de la semaine)
+    devotions.forEach((d) => {
+      const membre = trouveMembreParNomGlobal(d.submitter_name, members);
+      if (!membre) return;
+      const dt = new Date(d.devotion_date + "T00:00:00");
+      const js = dt.getDay();
+      dt.setDate(dt.getDate() + (js === 0 ? -6 : 1 - js));
+      const lundiDeLaSemaine = dt.toISOString().slice(0, 10);
+      map[membre.member_id] = map[membre.member_id] || new Set();
+      map[membre.member_id].add(lundiDeLaSemaine);
+    });
+
+    return { semaines: liste, parSemaineParMembre: map };
+  }, [devotions, members, dateDebut, dateFin]);
 
   const ORDRE_ROLES = ['Bethel Leader', 'Ananias', 'Overseer', 'Ministre Ordonné', 'Assistant Pasteur', 'Pasteur', 'Membre'];
   const rolesTries = Object.keys(parRole).sort((a, b) => {
@@ -2525,6 +2568,46 @@ function DevotionsView() {
                             ))}
                           </div>
                         </>
+                      )}
+
+                      {semaines.length > 1 && v.tousLesMembres.length > 0 && (
+                        <div style={{ marginTop: "16px", overflowX: "auto" }}>
+                          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "8px" }}>
+                            📅 Weekly breakdown
+                          </div>
+                          <table style={{ borderCollapse: "collapse", fontSize: "11px", whiteSpace: "nowrap" }}>
+                            <thead>
+                              <tr>
+                                <th style={{ textAlign: "left", padding: "4px 10px 4px 0", color: "var(--ink-muted)", position: "sticky", left: 0, background: "var(--bg)" }}>Name</th>
+                                {semaines.map((s) => (
+                                  <th key={s} style={{ padding: "4px 6px", color: "var(--ink-muted)", fontWeight: 600 }}>
+                                    {new Date(s + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {v.tousLesMembres.map((m) => (
+                                <tr key={m.member_id}>
+                                  <td style={{
+                                    padding: "3px 10px 3px 0", color: "var(--ink)", position: "sticky", left: 0,
+                                    background: "var(--bg)", cursor: "pointer", textDecoration: "underline", textDecorationColor: "var(--border)",
+                                  }} onClick={() => setPersonneOuverte(m)}>
+                                    {m.first_name} {m.last_name}
+                                  </td>
+                                  {semaines.map((s) => {
+                                    const aSoumis = parSemaineParMembre[m.member_id]?.has(s);
+                                    return (
+                                      <td key={s} style={{ padding: "3px 6px", textAlign: "center" }}>
+                                        <span style={{ color: aSoumis ? "var(--teal)" : "var(--border)" }}>{aSoumis ? "✓" : "·"}</span>
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
                     </div>
                   )}
