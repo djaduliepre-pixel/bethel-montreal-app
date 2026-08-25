@@ -1505,7 +1505,102 @@ function BethelsView({ bethels, onOpenDetail }) {
   );
 }
 
-function ReportsView({ submissions }) {
+function DataGapsReport({ bethels }) {
+  const [members, setMembers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const [sansContact, sansAdresse] = await Promise.all([
+          supaGet("members", "or=(and(phone.is.null,email.is.null),and(phone.eq.,email.eq.))&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
+          supaGet("members", "or=(address.is.null,address.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
+        ]);
+        const parId = {};
+        sansContact.forEach((m) => { parId[m.member_id] = { ...m, exception: "missing_contact" }; });
+        sansAdresse.forEach((m) => {
+          if (parId[m.member_id]) parId[m.member_id].exception = "missing_contact"; // priorité au plus grave
+          else parId[m.member_id] = { ...m, exception: "missing_address" };
+        });
+        setMembers(Object.values(parId));
+      } catch (e) {
+        setMembers([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const bethelById = useMemo(() => Object.fromEntries(bethels.map((b) => [b.bethel_id, b])), [bethels]);
+  const filtered = filter === "all" ? members : members.filter((m) => m.exception === filter);
+  const countContact = members.filter((m) => m.exception === "missing_contact").length;
+  const countAddress = members.filter((m) => m.exception === "missing_address").length;
+
+  const EXCEPTION_LABELS = {
+    missing_contact: { label: "Missing contact", color: "var(--brick)" },
+    missing_address: { label: "Missing address", color: "var(--gold)" },
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+        {[
+          { id: "all", label: `All (${members.length})` },
+          { id: "missing_contact", label: `Missing contact (${countContact})` },
+          { id: "missing_address", label: `Missing address (${countAddress})` },
+        ].map((f) => (
+          <button key={f.id} onClick={() => setFilter(f.id)} style={{
+            padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
+            border: `1px solid ${filter === f.id ? "var(--plum)" : "var(--border)"}`,
+            background: filter === f.id ? "var(--plum)" : "var(--surface)",
+            color: filter === f.id ? "#fff" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Checking members…</div>
+      ) : filtered.length === 0 ? (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+          No gaps found — every active member has contact info and an address. 🎉
+        </div>
+      ) : (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
+          {filtered.map((m, i) => {
+            const bethel = bethelById[m.bethel_id];
+            const ex = EXCEPTION_LABELS[m.exception];
+            return (
+              <div key={m.member_id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
+                borderBottom: i < filtered.length - 1 ? "1px solid var(--border)" : "none", background: "var(--surface)",
+              }}>
+                <div>
+                  <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{m.first_name} {m.last_name}</div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "2px" }}>
+                    {bethel ? `${bethel.leader_name}'s Bethel · ${bethel.zone_name}` : "Unknown Bethel"}
+                  </div>
+                </div>
+                <span style={{
+                  fontSize: "11px", padding: "3px 10px", borderRadius: "999px", fontWeight: 600,
+                  background: `${ex.color}18`, color: ex.color,
+                }}>
+                  {ex.label}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ReportsView({ submissions, bethels }) {
+  const [tab, setTab] = useState("hosting");
   const byLeadership = useMemo(() => {
     const counts = {};
     submissions.forEach((s) => {
@@ -1522,31 +1617,49 @@ function ReportsView({ submissions }) {
   return (
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Reports</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 24px" }}>
-        Willing-to-host, broken down by leadership level.
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
+        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : "Members missing key information."}
       </p>
-      {submissions.length === 0 ? (
-        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
-          No submissions yet to report on.
-        </div>
+
+      <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
+        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }].map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} style={{
+            padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
+            border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
+            background: tab === t.id ? "rgba(107,42,62,0.08)" : "var(--surface)",
+            color: tab === t.id ? "var(--plum)" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === "hosting" ? (
+        submissions.length === 0 ? (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+            No submissions yet to report on.
+          </div>
+        ) : (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "20px", background: "var(--surface)" }}>
+            {Object.entries(byLeadership).map(([role, v]) => {
+              const total = v.yes + v.no;
+              return (
+                <div key={role} style={{ marginBottom: "14px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", marginBottom: "4px" }}>
+                    <span style={{ color: "var(--ink)", fontWeight: 600 }}>{LEADERSHIP_LABELS[role] || role}</span>
+                    <span style={{ color: "var(--ink-muted)" }}>{v.yes} yes / {total} total</span>
+                  </div>
+                  <div style={{ height: "8px", background: "var(--bg)", borderRadius: "999px", overflow: "hidden", display: "flex" }}>
+                    <div style={{ width: `${(v.yes / maxVal) * 100}%`, background: "var(--teal)" }} />
+                    <div style={{ width: `${(v.no / maxVal) * 100}%`, background: "var(--brick)", opacity: 0.55 }} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )
       ) : (
-        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "20px", background: "var(--surface)" }}>
-          {Object.entries(byLeadership).map(([role, v]) => {
-            const total = v.yes + v.no;
-            return (
-              <div key={role} style={{ marginBottom: "14px" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12.5px", marginBottom: "4px" }}>
-                  <span style={{ color: "var(--ink)", fontWeight: 600 }}>{LEADERSHIP_LABELS[role] || role}</span>
-                  <span style={{ color: "var(--ink-muted)" }}>{v.yes} yes / {total} total</span>
-                </div>
-                <div style={{ height: "8px", background: "var(--bg)", borderRadius: "999px", overflow: "hidden", display: "flex" }}>
-                  <div style={{ width: `${(v.yes / maxVal) * 100}%`, background: "var(--teal)" }} />
-                  <div style={{ width: `${(v.no / maxVal) * 100}%`, background: "var(--brick)", opacity: 0.55 }} />
-                </div>
-              </div>
-            );
-          })}
-        </div>
+        <DataGapsReport bethels={bethels} />
       )}
     </div>
   );
@@ -1936,7 +2049,7 @@ function BethelAdminPortalInner() {
             )}
             {view === "bethels" && <BethelsView bethels={bethels} onOpenDetail={setDetailFor} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
-            {view === "reports" && <ReportsView submissions={submissions} />}
+            {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
         )}
