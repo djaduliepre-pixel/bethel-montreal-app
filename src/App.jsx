@@ -276,13 +276,16 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
   const [query, setQuery] = useState("");
   const [selectedZone, setSelectedZone] = useState(null);
   const [checklist, setChecklist] = useState({
-    propre: false, prive: false, capacite: false, places: false,
+    propre: false, prive: false, capacite: false, places: false, tv: false, internetElec: false,
   });
+  const [rappelOuvert, setRappelOuvert] = useState(false);
   const CHECKLIST_ITEMS = [
     { key: "propre", label: "Le lieu est propre et bien entretenu" },
     { key: "prive", label: "Ce n'est pas un espace intime (pas une chambre, une salle de bain ou une cuisine)" },
     { key: "capacite", label: "Peut accueillir confortablement au moins 4 personnes" },
     { key: "places", label: "Places assises pour au moins 4 personnes" },
+    { key: "tv", label: "Télévision disponible" },
+    { key: "internetElec", label: "Internet et électricité disponibles" },
   ];
   const checklistComplete = Object.values(checklist).every(Boolean);
 
@@ -328,6 +331,27 @@ function ActivateModal({ submission, zones, onClose, onActivate, activating }) {
           <MapPin size={16} color="var(--ink-muted)" style={{ marginTop: "2px", flexShrink: 0 }} />
           <span style={{ fontSize: "13.5px", color: "var(--ink)", lineHeight: 1.4 }}>{submission.address}</span>
         </div>
+
+        <button
+          onClick={() => setRappelOuvert(!rappelOuvert)}
+          style={{
+            display: "flex", alignItems: "center", gap: "5px", marginTop: "10px", background: "none",
+            border: "none", cursor: "pointer", color: "var(--plum)", fontSize: "12px", fontWeight: 600, padding: 0,
+          }}
+        >
+          <ChevronRight size={12} style={{ transform: rappelOuvert ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+          Approval process reminder
+        </button>
+        {rappelOuvert && (
+          <ol style={{ margin: "8px 0 0", paddingLeft: "18px", fontSize: "12px", color: "var(--ink-muted)", lineHeight: 1.9 }}>
+            <li>Click on the person's name (already done)</li>
+            <li>Call the person for an interview</li>
+            <li>Congratulate them for this beautiful decision</li>
+            <li>Ask a few questions about the home</li>
+            <li>Those questions are the checklist below</li>
+            <li>Do a home visit to confirm before activating</li>
+          </ol>
+        )}
 
         <div style={{ marginTop: "18px" }}>
           <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>
