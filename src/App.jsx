@@ -1311,10 +1311,14 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
 /* ------------------------------------------------------------------ */
 /* Vues                                                                */
 /* ------------------------------------------------------------------ */
-function DashboardView({ submissions, bethels, zones }) {
+function DashboardView({ submissions, bethels, zones, onNavigate }) {
   const pending = submissions.filter((s) => s.status === "pending").length;
   const willing = submissions.filter((s) => s.willing_to_host).length;
   const pct = submissions.length ? Math.round((willing / submissions.length) * 100) : 0;
+
+  const readyToActivate = submissions.filter((s) => s.status === "pending" && s.willing_to_host).length;
+  const readyToAssign = submissions.filter((s) => s.status === "pending" && !s.willing_to_host).length;
+  const approved = submissions.filter((s) => s.status === "approved").length;
 
   return (
     <div>
@@ -1327,6 +1331,43 @@ function DashboardView({ submissions, bethels, zones }) {
         <StatCard label="Active Bethels" value={bethels.length} sub="households running today" accent="var(--teal)" />
         <StatCard label="Willing to host" value={submissions.length ? `${pct}%` : "—"} sub={`${willing} of ${submissions.length} submissions`} accent="var(--plum)" />
         <StatCard label="Zones on file" value={zones.length} sub="Québec + Canada" />
+      </div>
+
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "18px", margin: "32px 0 12px" }}>Workflow queue</h2>
+      <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+        {[
+          {
+            label: "Ready to Activate", value: readyToActivate, color: "var(--teal)",
+            desc: "Yes submissions still pending — ready to call, review, and activate as a new Bethel.",
+          },
+          {
+            label: "Ready to Assign", value: readyToAssign, color: "var(--gold)",
+            desc: "No submissions still pending — need to be matched to a nearby active Bethel.",
+          },
+          {
+            label: "Approved", value: approved, color: "var(--plum)",
+            desc: "Submissions already processed — activated as a Bethel or assigned as a member.",
+          },
+        ].map((row) => (
+          <button
+            key={row.label}
+            onClick={() => onNavigate && onNavigate("submissions")}
+            style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "14px 18px", borderRadius: "10px", border: "1px solid var(--border)",
+              background: "var(--surface)", cursor: "pointer", textAlign: "left", fontFamily: "var(--font-body)",
+            }}
+          >
+            <div>
+              <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{row.label}</div>
+              <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "3px", maxWidth: "480px" }}>{row.desc}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0, marginLeft: "16px" }}>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: "22px", color: row.color }}>{row.value}</span>
+              <ChevronRight size={16} color="var(--ink-muted)" />
+            </div>
+          </button>
+        ))}
       </div>
 
       {submissions.length > 0 && (
@@ -2895,7 +2936,7 @@ function BethelAdminPortalInner() {
           <div style={{ color: "var(--ink-muted)", fontSize: "14px" }}>Loading from Supabase…</div>
         ) : (
           <>
-            {view === "dashboard" && <DashboardView submissions={submissions} bethels={bethels} zones={zones} />}
+            {view === "dashboard" && <DashboardView submissions={submissions} bethels={bethels} zones={zones} onNavigate={setView} />}
             {view === "submissions" && (
               <SubmissionsView
                 submissions={submissions}
