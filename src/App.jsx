@@ -2604,6 +2604,7 @@ function DevotionsView() {
                                 .sort((a, b) => (scoreParMembre[b.member_id] || 0) - (scoreParMembre[a.member_id] || 0))
                                 .map((m) => {
                                   const score = scoreParMembre[m.member_id] || 0;
+                                  const pct = jours.length ? Math.round((score / jours.length) * 100) : 0;
                                   return (
                                     <tr key={m.member_id}>
                                       <td style={{
@@ -2614,9 +2615,9 @@ function DevotionsView() {
                                       </td>
                                       <td style={{
                                         padding: "3px 8px", textAlign: "center", fontWeight: 700,
-                                        color: score >= 7 ? "var(--teal)" : score === 0 ? "var(--brick)" : "var(--gold)",
+                                        color: pct >= Math.round(OBJECTIF_DEVOTION * 100) ? "var(--teal)" : score === 0 ? "var(--brick)" : "var(--gold)",
                                       }}>
-                                        {score}/{jours.length}
+                                        {score}/{jours.length} ({pct}%)
                                       </td>
                                       {jours.map((j) => {
                                         const aSoumis = parJourParMembre[m.member_id]?.has(j);
