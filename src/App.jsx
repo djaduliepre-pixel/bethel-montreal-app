@@ -1430,9 +1430,9 @@ function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }
       <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
         {[
           { id: "ready", label: `⭐ Ready to host (${readyToHost.length})` },
-          { id: "pending", label: "Pending" },
-          { id: "approved", label: "Approved" },
-          { id: "all", label: "All" },
+          { id: "pending", label: `Pending (${submissions.filter((s) => s.status === "pending").length})` },
+          { id: "approved", label: `Approved (${submissions.filter((s) => s.status === "approved").length})` },
+          { id: "all", label: `All (${submissions.length})` },
         ].map((f) => (
           <button key={f.id} onClick={() => setFilter(f.id)} style={{
             padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
