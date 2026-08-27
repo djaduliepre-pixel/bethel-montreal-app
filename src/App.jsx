@@ -1523,47 +1523,121 @@ function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }
   );
 }
 
-function BethelsView({ bethels, onOpenDetail }) {
+function BethelsView({ bethels, memberCounts, onOpenDetail }) {
+  const [recherche, setRecherche] = useState("");
+  const [filtre, setFiltre] = useState("all");
+
+  const filtres = [
+    { id: "all", label: "All" },
+    { id: "needs_members", label: "Needs Members" },
+    { id: "active", label: "Active" },
+    { id: "inactive", label: "Inactive" },
+  ];
+
+  const resultats = useMemo(() => {
+    let liste = bethels;
+    if (filtre === "needs_members") liste = liste.filter((b) => (memberCounts[b.bethel_id] || 0) === 0);
+    if (filtre === "active") liste = liste.filter((b) => b.status !== "inactive");
+    if (filtre === "inactive") liste = liste.filter((b) => b.status === "inactive");
+
+    const q = recherche.trim().toLowerCase();
+    if (q.length >= 1) {
+      liste = liste.filter((b) =>
+        (b.leader_name || "").toLowerCase().includes(q) || (b.hp_number || "").toLowerCase().includes(q)
+      );
+    }
+    return liste;
+  }, [bethels, memberCounts, filtre, recherche]);
+
   return (
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Bethels</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
-        Rows from your real "bethels" table. Click a card to see its members.
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
+        Campus: TG Montreal — {bethels.length} total.
       </p>
-      {bethels.length === 0 ? (
+
+      <div style={{ position: "relative", maxWidth: "360px", marginBottom: "14px" }}>
+        <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+        <input
+          value={recherche}
+          onChange={(e) => setRecherche(e.target.value)}
+          placeholder="Search by name or church ID…"
+          style={{
+            width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px",
+            border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none",
+          }}
+        />
+      </div>
+
+      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+        {filtres.map((f) => (
+          <button key={f.id} onClick={() => setFiltre(f.id)} style={{
+            padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
+            border: `1px solid ${filtre === f.id ? "var(--plum)" : "var(--border)"}`,
+            background: filtre === f.id ? "var(--plum)" : "var(--surface)",
+            color: filtre === f.id ? "#fff" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {resultats.length === 0 ? (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
-          No Bethels yet — activate a submission to create your first one.
+          No Bethels match this search/filter.
         </div>
       ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: "12px" }}>
-          {bethels.map((b) => (
-            <button
-              key={b.bethel_id}
-              onClick={() => onOpenDetail(b)}
-              style={{
-                background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "10px",
-                padding: "16px 18px", textAlign: "left", cursor: "pointer", fontFamily: "var(--font-body)",
-                transition: "border-color 0.15s",
-              }}
-              onMouseEnter={(e) => e.currentTarget.style.borderColor = "var(--plum)"}
-              onMouseLeave={(e) => e.currentTarget.style.borderColor = "var(--border)"}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink-muted)" }}>{b.hp_number}</span>
-                <ZoneStamp code={b.zone_code} />
-              </div>
-              <div style={{ fontSize: "16px", fontWeight: 600, color: "var(--ink)", marginTop: "8px" }}>{b.leader_name}</div>
-              <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "2px" }}>{b.zone_name}</div>
-              {b.address && (
-                <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "10px", display: "flex", alignItems: "center", gap: "5px" }}>
-                  <MapPin size={12} /> {b.address}
-                </div>
-              )}
-              <div style={{ marginTop: "10px", fontSize: "11.5px", color: "var(--plum)", fontWeight: 600, display: "flex", alignItems: "center", gap: "4px" }}>
-                View members <ChevronRight size={12} />
-              </div>
-            </button>
-          ))}
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+            <thead>
+              <tr style={{ background: "var(--bg)" }}>
+                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Church ID</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Leader</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Members</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Zone</th>
+                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Status</th>
+                <th style={{ textAlign: "right", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resultats.map((b, i) => {
+                const count = memberCounts[b.bethel_id] || 0;
+                return (
+                  <tr key={b.bethel_id} style={{ borderTop: i > 0 ? "1px solid var(--border)" : "none" }}>
+                    <td style={{ padding: "10px 14px" }}>
+                      <div style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink)" }}>{b.hp_number}</div>
+                    </td>
+                    <td style={{ padding: "10px 14px", color: "var(--ink)", fontWeight: 600 }}>{b.leader_name || "—"}</td>
+                    <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                      {count === 0 ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)" }}>0 NEEDED</span>
+                      ) : (
+                        <span style={{ color: "var(--ink)" }}>{count}</span>
+                      )}
+                    </td>
+                    <td style={{ padding: "10px 14px", color: "var(--ink-muted)", fontSize: "12px" }}>{b.zone_name}</td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <span style={{
+                        fontSize: "11px", padding: "2px 9px", borderRadius: "999px", fontWeight: 600,
+                        background: b.status === "inactive" ? "rgba(162,59,51,0.10)" : "rgba(31,92,78,0.10)",
+                        color: b.status === "inactive" ? "var(--brick)" : "var(--teal)",
+                      }}>
+                        {b.status === "inactive" ? "Inactive" : "Active"}
+                      </span>
+                    </td>
+                    <td style={{ padding: "10px 14px", textAlign: "right" }}>
+                      <button onClick={() => onOpenDetail(b)} style={{
+                        padding: "5px 12px", borderRadius: "6px", border: "1px solid var(--plum)",
+                        background: "transparent", color: "var(--plum)", fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                      }}>
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
     </div>
@@ -2763,20 +2837,26 @@ function BethelAdminPortalInner() {
   const [activating, setActivating] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [memberCounts, setMemberCounts] = useState({});
 
   const loadAll = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const [zonesData, campusesData, submissionsData, bethelsRaw] = await Promise.all([
+      const [zonesData, campusesData, submissionsData, bethelsRaw, membresLegers] = await Promise.all([
         supaGet("data_zones", "select=*&is_active=eq.true&order=zone_name.asc"),
         supaGet("campuses", "select=*&campus_code=eq.MTL"),
         supaGet("submissions", "select=*&order=submitted_at.desc"),
         supaGet("bethels", "select=*&status=eq.active&order=created_at.desc"),
+        supaGet("members", "select=bethel_id&status=eq.active"),
       ]);
       setZones(zonesData);
       if (campusesData[0]) setCampusId(campusesData[0].campus_id);
       setSubmissions(submissionsData);
+
+      const compteurs = {};
+      membresLegers.forEach((m) => { compteurs[m.bethel_id] = (compteurs[m.bethel_id] || 0) + 1; });
+      setMemberCounts(compteurs);
 
       const zoneById = Object.fromEntries(zonesData.map((z) => [z.zone_id, z]));
       setBethels(bethelsRaw.map((b) => ({
@@ -2945,7 +3025,7 @@ function BethelAdminPortalInner() {
                 onAddNew={() => setShowNewSubmission(true)}
               />
             )}
-            {view === "bethels" && <BethelsView bethels={bethels} onOpenDetail={setDetailFor} />}
+            {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} />}
