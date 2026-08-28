@@ -1160,6 +1160,136 @@ function AddMemberForm({ bethelId, onAdded }) {
 /* ------------------------------------------------------------------ */
 /* Fenêtre : détail d'un Bethel, avec ses membres                     */
 /* ------------------------------------------------------------------ */
+function FindNearbyMembersPanel({ bethel, onAssigned }) {
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [candidats, setCandidats] = useState([]);
+  const [assigningId, setAssigningId] = useState(null);
+
+  async function lancerRecherche() {
+    if (!bethel.address) return;
+    setLoading(true);
+    setOpen(true);
+    try {
+      const pendants = await supaGet(
+        "submissions",
+        "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"
+      );
+      const avecDistance = await Promise.all(
+        pendants.filter((p) => p.address).map(async (p) => {
+          try {
+            const minutes = await getDrivingMinutes(p.address, bethel.address);
+            return { ...p, minutes, error: null };
+          } catch (e) {
+            return { ...p, minutes: null, error: e.message };
+          }
+        })
+      );
+      avecDistance.sort((a, b) => {
+        if (a.minutes == null) return 1;
+        if (b.minutes == null) return -1;
+        return a.minutes - b.minutes;
+      });
+      setCandidats(avecDistance.slice(0, 20)); // garde les 20 plus proches
+    } catch (e) {
+      setCandidats([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function assigner(candidat) {
+    setAssigningId(candidat.submission_id);
+    try {
+      await supaPost("members", {
+        bethel_id: bethel.bethel_id,
+        first_name: candidat.first_name, last_name: candidat.last_name, phone: candidat.phone,
+        address: candidat.address,
+        role: LEADERSHIP_LABELS[candidat.leadership_level] || "Membre",
+        willing_to_host: false, status: "active",
+      });
+      await supaPatch("submissions", `submission_id=eq.${candidat.submission_id}`, {
+        status: "approved", zone_id: bethel.zone_id, reviewed_at: new Date().toISOString(),
+      });
+      setCandidats((c) => c.filter((x) => x.submission_id !== candidat.submission_id));
+      onAssigned();
+    } catch (e) {
+      alert("Error: " + e.message);
+    } finally {
+      setAssigningId(null);
+    }
+  }
+
+  if (!bethel.address) {
+    return (
+      <div style={{ fontSize: "12px", color: "var(--brick)", marginTop: "10px" }}>
+        ⚠️ Add an address to this Bethel before searching for nearby members.
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: "14px" }}>
+      {!open ? (
+        <button onClick={lancerRecherche} style={{
+          display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px",
+          border: "1px solid var(--plum)", background: "transparent", color: "var(--plum)", fontSize: "13px",
+          fontWeight: 600, cursor: "pointer",
+        }}>
+          <Search size={14} /> Find Nearby Members
+        </button>
+      ) : (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "16px", background: "var(--bg)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Nearby pending members ("No" submissions)</span>
+            <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
+          </div>
+          {loading ? (
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Checking travel times for all pending submissions…</div>
+          ) : candidats.length === 0 ? (
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>No pending "No" submissions with a usable address found.</div>
+          ) : (
+            candidats.map((c) => (
+              <div key={c.submission_id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0",
+                borderBottom: "1px solid var(--border)",
+              }}>
+                <div>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{c.first_name} {c.last_name}</div>
+                  <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{c.address}</div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
+                  {c.minutes != null ? (
+                    <span style={{
+                      fontSize: "11.5px", fontWeight: 600, padding: "3px 9px", borderRadius: "999px",
+                      background: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "rgba(31,92,78,0.10)" : "rgba(184,134,59,0.12)",
+                      color: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "var(--teal)" : "var(--gold)",
+                    }}>
+                      🚗 {c.minutes} min
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>No route</span>
+                  )}
+                  <button
+                    disabled={assigningId === c.submission_id}
+                    onClick={() => assigner(c)}
+                    style={{
+                      padding: "5px 12px", borderRadius: "6px", border: "none", background: "var(--plum)",
+                      color: "#fff", fontSize: "11.5px", fontWeight: 600, cursor: "pointer",
+                    }}
+                  >
+                    {assigningId === c.submission_id ? "…" : "Assign"}
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -1293,6 +1423,7 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
           ))}
 
           <AddMemberForm bethelId={bethel.bethel_id} onAdded={loadMembers} />
+          <FindNearbyMembersPanel bethel={bethel} onAssigned={() => { loadMembers(); onChanged(); }} />
         </div>
       </div>
 
