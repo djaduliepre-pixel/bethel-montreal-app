@@ -957,6 +957,7 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast, onOpenProfi
 function MemberProfileModal({ member, onClose, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [form, setForm] = useState({
     first_name: member.first_name || "", last_name: member.last_name || "",
     phone: member.phone || "", email: member.email || "", gender: member.gender || "",
@@ -966,6 +967,10 @@ function MemberProfileModal({ member, onClose, onSaved }) {
     overseer_name: member.overseer_name || "", ordained_minister_name: member.ordained_minister_name || "",
     willing_to_host: member.willing_to_host || false,
     status: member.status || "active",
+    photo_url: member.photo_url || "",
+    previous_church: member.previous_church || "",
+    baptized: member.baptized || false,
+    baptism_date: member.baptism_date || "",
   });
 
   const inputStyle = {
@@ -982,6 +987,29 @@ function MemberProfileModal({ member, onClose, onSaved }) {
         <div style={{ fontSize: "13.5px", color: "var(--ink)" }}>{value}</div>
       </div>
     );
+  }
+
+  async function televerserPhoto(fichier) {
+    setUploadingPhoto(true);
+    try {
+      const extension = fichier.name.split(".").pop();
+      const cheminFichier = `${member.member_id}-${Date.now()}.${extension}`;
+      const res = await fetch(
+        `${SUPABASE_URL}/storage/v1/object/member-photos/${cheminFichier}`,
+        {
+          method: "POST",
+          headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+          body: fichier,
+        }
+      );
+      if (!res.ok) throw new Error("Upload failed: " + (await res.text()));
+      const urlPublique = `${SUPABASE_URL}/storage/v1/object/public/member-photos/${cheminFichier}`;
+      setForm((f) => ({ ...f, photo_url: urlPublique }));
+    } catch (e) {
+      alert("Photo upload error: " + e.message);
+    } finally {
+      setUploadingPhoto(false);
+    }
   }
 
   async function save() {
@@ -1004,9 +1032,22 @@ function MemberProfileModal({ member, onClose, onSaved }) {
         padding: "26px", boxShadow: "0 24px 60px rgba(36,30,24,0.3)",
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
-          <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: 0, color: "var(--ink)" }}>
-            {editing ? "Edit profile" : `${member.first_name} ${member.last_name}`}
-          </h2>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+            {(member.photo_url || form.photo_url) && !editing ? (
+              <img src={member.photo_url} alt="" style={{ width: "48px", height: "48px", borderRadius: "50%", objectFit: "cover", border: "1px solid var(--border)" }} />
+            ) : !editing ? (
+              <div style={{
+                width: "48px", height: "48px", borderRadius: "50%", background: "var(--bg)",
+                border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center",
+                fontSize: "16px", fontWeight: 700, color: "var(--ink-muted)",
+              }}>
+                {(member.first_name || "?")[0]}
+              </div>
+            ) : null}
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: 0, color: "var(--ink)" }}>
+              {editing ? "Edit profile" : `${member.first_name} ${member.last_name}`}
+            </h2>
+          </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", padding: "4px" }}>
             <X size={18} />
           </button>
@@ -1022,6 +1063,12 @@ function MemberProfileModal({ member, onClose, onSaved }) {
               <Field label="Gender" value={member.gender} />
               <Field label="Address" value={member.address ? `${member.address}${member.postal_code ? ", " + member.postal_code : ""}` : null} />
               <Field label="Willing to host" value={member.willing_to_host ? "Yes" : "No"} />
+
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", marginTop: "16px", marginBottom: "10px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
+                Membership record
+              </div>
+              <Field label="Previous church / group" value={member.previous_church} />
+              <Field label="Baptized" value={member.baptized ? `Yes${member.baptism_date ? " — " + member.baptism_date : ""}` : "No"} />
 
               {(member.ananias_name || member.bethel_leader_name || member.overseer_name || member.ordained_minister_name) && (
                 <>
@@ -1045,6 +1092,24 @@ function MemberProfileModal({ member, onClose, onSaved }) {
             </>
           ) : (
             <>
+              <span style={labelStyle}>Photo</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "8px" }}>
+                {form.photo_url ? (
+                  <img src={form.photo_url} alt="" style={{ width: "44px", height: "44px", borderRadius: "50%", objectFit: "cover", border: "1px solid var(--border)" }} />
+                ) : (
+                  <div style={{ width: "44px", height: "44px", borderRadius: "50%", background: "var(--bg)", border: "1px solid var(--border)" }} />
+                )}
+                <label style={{
+                  padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)",
+                  fontSize: "11.5px", cursor: "pointer", color: "var(--ink)",
+                }}>
+                  {uploadingPhoto ? "Uploading…" : "Upload photo"}
+                  <input type="file" accept="image/*" style={{ display: "none" }} disabled={uploadingPhoto}
+                    onChange={(e) => e.target.files[0] && televerserPhoto(e.target.files[0])} />
+                </label>
+              </div>
+              <input style={inputStyle} placeholder="Or paste a photo link (URL)" value={form.photo_url} onChange={(e) => setForm((f) => ({ ...f, photo_url: e.target.value }))} />
+
               <span style={labelStyle}>First / last name</span>
               <div style={{ display: "flex", gap: "6px" }}>
                 <input style={inputStyle} value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
@@ -1071,6 +1136,22 @@ function MemberProfileModal({ member, onClose, onSaved }) {
                 <input type="checkbox" checked={form.willing_to_host} onChange={(e) => setForm((f) => ({ ...f, willing_to_host: e.target.checked }))} />
                 Willing to host
               </label>
+
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "6px 0 8px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
+                Membership record
+              </div>
+              <span style={labelStyle}>Previous church / group</span>
+              <input style={inputStyle} placeholder="e.g. Tabernacle de Gloire" value={form.previous_church} onChange={(e) => setForm((f) => ({ ...f, previous_church: e.target.value }))} />
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink)", margin: "2px 0 8px" }}>
+                <input type="checkbox" checked={form.baptized} onChange={(e) => setForm((f) => ({ ...f, baptized: e.target.checked }))} />
+                Baptized
+              </label>
+              {form.baptized && (
+                <>
+                  <span style={labelStyle}>Baptism date</span>
+                  <input type="date" style={inputStyle} value={form.baptism_date} onChange={(e) => setForm((f) => ({ ...f, baptism_date: e.target.value }))} />
+                </>
+              )}
 
               <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", marginTop: "6px", marginBottom: "8px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
                 Supervision chain
@@ -3044,7 +3125,7 @@ function BethelAdminPortalInner() {
         nouveauNumero = `BETHEL-${prefixeVille}-${max + 1}`;
       } catch (e) { /* on garde le repli si la recherche échoue */ }
 
-      await supaPost("bethels", {
+      const [nouveauBethel] = await supaPost("bethels", {
         hp_number: nouveauNumero,
         campus_id: submission.campus_id,
         zone_id: zone.zone_id,
@@ -3054,6 +3135,25 @@ function BethelAdminPortalInner() {
         address: submission.address,
         status: "active",
       });
+
+      // Ajoute automatiquement la leader/hôtesse elle-même comme premier membre
+      // de son propre Bethel -- sinon le groupe reste vide même si elle en est
+      // clairement responsable.
+      if (nouveauBethel) {
+        try {
+          await supaPost("members", {
+            bethel_id: nouveauBethel.bethel_id,
+            first_name: submission.first_name,
+            last_name: submission.last_name,
+            phone: submission.phone,
+            address: submission.address,
+            role: submission.leadership_level === "hp_leader" ? "Bethel Leader" : (LEADERSHIP_LABELS[submission.leadership_level] || "Membre"),
+            willing_to_host: true,
+            status: "active",
+          });
+        } catch (e) { /* la fiche Bethel reste créée même si cet ajout échoue */ }
+      }
+
       await supaPatch("submissions", `submission_id=eq.${submission.submission_id}`, {
         status: "approved", zone_id: zone.zone_id, reviewed_at: new Date().toISOString(),
       });
