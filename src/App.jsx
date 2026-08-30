@@ -1738,7 +1738,18 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
                     <td style={{ padding: "10px 14px" }}>
                       <div style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink)" }}>{b.hp_number}</div>
                     </td>
-                    <td style={{ padding: "10px 14px", color: "var(--ink)", fontWeight: 600 }}>{b.leader_name || "—"}</td>
+                    <td style={{ padding: "10px 14px" }}>
+                      <button
+                        onClick={() => onOpenDetail(b)}
+                        style={{
+                          background: "none", border: "none", cursor: "pointer", padding: 0,
+                          color: "var(--ink)", fontWeight: 600, fontSize: "13px", fontFamily: "var(--font-body)",
+                          textDecoration: "underline", textDecorationColor: "var(--border)",
+                        }}
+                      >
+                        {b.leader_name || "—"}
+                      </button>
+                    </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
                       {count === 0 ? (
                         <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)" }}>0 NEEDED</span>
