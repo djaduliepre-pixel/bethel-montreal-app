@@ -1880,8 +1880,8 @@ function DataGapsReport({ bethels }) {
       setLoading(true);
       try {
         const [sansContact, sansAdresse] = await Promise.all([
-          supaGet("members", "or=(and(phone.is.null,email.is.null),and(phone.eq.,email.eq.))&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
-          supaGet("members", "or=(address.is.null,address.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
+          supaGet("members", "or=(and(phone.is.null,email.is.null),and(phone.eq.,email.eq.))&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
+          supaGet("members", "or=(address.is.null,address.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
         ]);
         const parId = {};
         sansContact.forEach((m) => { parId[m.member_id] = { ...m, exception: "missing_contact" }; });
@@ -2706,8 +2706,8 @@ function DevotionsView() {
     setLoading(true);
     try {
       const [devs, mems] = await Promise.all([
-        supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date`),
-        supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone"),
+        supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date&limit=5000`),
+        supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone&limit=5000"),
       ]);
       setDevotions(devs);
       setMembers(mems);
@@ -3072,9 +3072,9 @@ function BethelAdminPortalInner() {
       const [zonesData, campusesData, submissionsData, bethelsRaw, membresLegers] = await Promise.all([
         supaGet("data_zones", "select=*&is_active=eq.true&order=zone_name.asc"),
         supaGet("campuses", "select=*&campus_code=eq.MTL"),
-        supaGet("submissions", "select=*&order=submitted_at.desc"),
-        supaGet("bethels", "select=*&status=eq.active&order=created_at.desc"),
-        supaGet("members", "select=bethel_id&status=eq.active"),
+        supaGet("submissions", "select=*&order=submitted_at.desc&limit=5000"),
+        supaGet("bethels", "select=*&status=eq.active&order=created_at.desc&limit=5000"),
+        supaGet("members", "select=bethel_id&status=eq.active&limit=5000"),
       ]);
       setZones(zonesData);
       if (campusesData[0]) setCampusId(campusesData[0].campus_id);
