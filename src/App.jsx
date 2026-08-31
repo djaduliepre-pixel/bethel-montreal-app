@@ -1015,7 +1015,10 @@ function MemberProfileModal({ member, onClose, onSaved }) {
   async function save() {
     setSaving(true);
     try {
-      await supaPatch("members", `member_id=eq.${member.member_id}`, form);
+      // Les champs date vides doivent être envoyés comme "rien" (null),
+      // jamais comme du texte vide "" -- sinon la base de données refuse.
+      const payload = { ...form, baptism_date: form.baptism_date || null };
+      await supaPatch("members", `member_id=eq.${member.member_id}`, payload);
       setEditing(false);
       onSaved();
     } catch (e) { alert("Error: " + e.message); } finally { setSaving(false); }
