@@ -1343,7 +1343,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
         if (b.minutes == null) return -1;
         return a.minutes - b.minutes;
       });
-      setCandidats(avecDistance.slice(0, 20)); // garde les 20 plus proches
+      setCandidats(avecDistance); // montre tout le monde, personne n'est coupé silencieusement
     } catch (e) {
       setCandidats([]);
     } finally {
@@ -1436,7 +1436,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
                       🚗 {c.minutes} min
                     </span>
                   ) : (
-                    <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>No route</span>
+                    <span style={{ fontSize: "11px", color: "var(--brick)" }} title={c.error}>⚠️ {c.error || "No route"}</span>
                   )}
                   <button
                     disabled={assigningId === c.submission_id}
