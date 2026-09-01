@@ -2347,7 +2347,14 @@ function formaterCodePostal(valeur) {
 }
 
 function normaliseNom(s) {
-  return String(s || "").trim().toLowerCase().replace(/[^a-zàâäéèêëïîôöùûüç\s]/gi, "");
+  // Enlève aussi les accents (é->e, à->a, etc.) pour que "Dieudonné" et "Dieudonne"
+  // soient reconnus comme la même personne, peu importe qui a tapé l'accent ou non.
+  return String(s || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z\s]/gi, "");
 }
 
 // Rapproche un nom soumis dans une dévotion avec la bonne fiche membre, avec la même
