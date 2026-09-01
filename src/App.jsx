@@ -2210,11 +2210,30 @@ function SearchMembersView({ bethels, onOpenBethel }) {
     setLoading(true);
     const timer = setTimeout(async () => {
       try {
-        const data = await supaGet(
+        // 1) Cherche par nom/téléphone, comme avant
+        const parNom = await supaGet(
           "members",
           `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*,phone.ilike.*${encodeURIComponent(q)}*)&order=first_name.asc&limit=40`
         );
-        setResults(data);
+
+        // 2) Cherche aussi si le texte tapé correspond à une ville/zone --
+        // si oui, ramène TOUS les membres des Bethels de cette zone.
+        const bethelsCorrespondants = bethels.filter((b) =>
+          (b.zone_name || "").toLowerCase().includes(q.toLowerCase())
+        );
+        let parZone = [];
+        if (bethelsCorrespondants.length > 0) {
+          const idsZone = bethelsCorrespondants.map((b) => b.bethel_id);
+          parZone = await supaGet(
+            "members",
+            `bethel_id=in.(${idsZone.join(",")})&status=eq.active&order=first_name.asc&limit=500`
+          );
+        }
+
+        // Fusionne les deux listes, sans doublons
+        const fusion = {};
+        [...parNom, ...parZone].forEach((m) => { fusion[m.member_id] = m; });
+        setResults(Object.values(fusion));
       } catch (e) {
         setResults([]);
       } finally {
@@ -2223,7 +2242,7 @@ function SearchMembersView({ bethels, onOpenBethel }) {
       }
     }, 350); // petit délai pour éviter une requête à chaque lettre tapée
     return () => clearTimeout(timer);
-  }, [query]);
+  }, [query, bethels]);
 
   const bethelById = useMemo(() => Object.fromEntries(bethels.map((b) => [b.bethel_id, b])), [bethels]);
 
@@ -2231,7 +2250,7 @@ function SearchMembersView({ bethels, onOpenBethel }) {
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Search Members</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
-        Find any of your {bethels.length ? "1200+" : ""} members and see which Bethel they belong to.
+        Find any of your {bethels.length ? "1200+" : ""} members, or search by city/zone (e.g. "Anjou").
       </p>
 
       <div style={{ position: "relative", marginBottom: "20px", maxWidth: "420px" }}>
@@ -2240,7 +2259,7 @@ function SearchMembersView({ bethels, onOpenBethel }) {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Type a name or phone number…"
+          placeholder="Type a name, phone number, or city…"
           style={{
             width: "100%", boxSizing: "border-box", padding: "9px 10px 9px 32px",
             border: "1px solid var(--border)", borderRadius: "8px", fontSize: "14px", outline: "none",
