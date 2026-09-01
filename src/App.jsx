@@ -2066,11 +2066,23 @@ function ReportsView({ submissions, bethels }) {
 
 function ZoneLookupView({ zones }) {
   const [query, setQuery] = useState("");
+  const [regionFiltree, setRegionFiltree] = useState("all");
+
+  const regions = useMemo(() => {
+    const ensemble = new Set(zones.map((z) => z.region).filter(Boolean));
+    return [...ensemble].sort();
+  }, [zones]);
+
   const results = useMemo(() => {
-    if (!query.trim()) return zones.slice(0, 40);
+    let liste = zones;
+    if (regionFiltree !== "all") liste = liste.filter((z) => z.region === regionFiltree);
+
     const q = query.trim().toLowerCase();
-    return zones.filter((z) => z.zone_name.toLowerCase().includes(q) || z.city_name.toLowerCase().includes(q)).slice(0, 60);
-  }, [query, zones]);
+    if (q) {
+      liste = liste.filter((z) => z.zone_name.toLowerCase().includes(q) || z.city_name.toLowerCase().includes(q));
+    }
+    return liste.slice(0, query.trim() || regionFiltree !== "all" ? 200 : 40);
+  }, [query, zones, regionFiltree]);
 
   return (
     <div>
@@ -2078,7 +2090,7 @@ function ZoneLookupView({ zones }) {
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
         {zones.length} zones live in your data_zones table.
       </p>
-      <div style={{ position: "relative", marginBottom: "16px", maxWidth: "360px" }}>
+      <div style={{ position: "relative", marginBottom: "14px", maxWidth: "360px" }}>
         <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
         <input
           value={query}
@@ -2090,6 +2102,28 @@ function ZoneLookupView({ zones }) {
           }}
         />
       </div>
+
+      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+        <button onClick={() => setRegionFiltree("all")} style={{
+          padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
+          border: `1px solid ${regionFiltree === "all" ? "var(--plum)" : "var(--border)"}`,
+          background: regionFiltree === "all" ? "var(--plum)" : "var(--surface)",
+          color: regionFiltree === "all" ? "#fff" : "var(--ink-muted)", cursor: "pointer",
+        }}>
+          All regions
+        </button>
+        {regions.map((r) => (
+          <button key={r} onClick={() => setRegionFiltree(r)} style={{
+            padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
+            border: `1px solid ${regionFiltree === r ? "var(--plum)" : "var(--border)"}`,
+            background: regionFiltree === r ? "var(--plum)" : "var(--surface)",
+            color: regionFiltree === r ? "#fff" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            {r}
+          </button>
+        ))}
+      </div>
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(230px, 1fr))", gap: "8px" }}>
         {results.map((z) => (
           <div key={z.zone_id} style={{
@@ -2098,7 +2132,7 @@ function ZoneLookupView({ zones }) {
           }}>
             <div>
               <div style={{ fontSize: "13px", color: "var(--ink)" }}>{z.zone_name}</div>
-              <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{z.city_name}</div>
+              <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{z.city_name}{z.region ? ` · ${z.region}` : ""}</div>
             </div>
             <ZoneStamp code={z.zone_code} muted />
           </div>
