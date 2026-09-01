@@ -105,12 +105,21 @@ function loadGoogleMaps() {
   return googleMapsLoadingPromise;
 }
 
+// Retire le texte "[Secteur: ...]" (ajouté par le formulaire pour garder une info
+// utile à l'affichage) avant d'envoyer l'adresse à Google Maps -- ce texte entre
+// crochets brise parfois la reconnaissance de l'adresse et fait échouer le calcul.
+function nettoyerAdressePourGoogleMaps(adresse) {
+  return String(adresse || "").replace(/\s*\[Secteur:[^\]]*\]\s*/gi, "").trim();
+}
+
 async function getDrivingMinutes(originAddress, destAddress) {
   await loadGoogleMaps();
+  const origine = nettoyerAdressePourGoogleMaps(originAddress);
+  const destination = nettoyerAdressePourGoogleMaps(destAddress);
   return new Promise((resolve, reject) => {
     const service = new window.google.maps.DistanceMatrixService();
     service.getDistanceMatrix(
-      { origins: [originAddress], destinations: [destAddress], travelMode: window.google.maps.TravelMode.DRIVING },
+      { origins: [origine], destinations: [destination], travelMode: window.google.maps.TravelMode.DRIVING },
       (response, status) => {
         if (status !== "OK") { reject(new Error(status)); return; }
         const el = response.rows[0]?.elements[0];
