@@ -1393,7 +1393,22 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
           ) : candidats.length === 0 ? (
             <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>No pending "No" submissions with a usable address found.</div>
           ) : (
-            candidats.map((c) => (
+            <>
+              {(() => {
+                const meilleurTemps = candidats.reduce((min, c) => (c.minutes != null && c.minutes < min ? c.minutes : min), Infinity);
+                if (meilleurTemps === Infinity || meilleurTemps <= LIMITE_MINUTES_PROXIMITE) return null;
+                return (
+                  <div style={{
+                    marginBottom: "10px", padding: "10px 12px", borderRadius: "8px",
+                    background: "rgba(184,134,59,0.10)", border: "1px solid rgba(184,134,59,0.3)",
+                    fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.5,
+                  }}>
+                    ⚠️ No one is within {LIMITE_MINUTES_PROXIMITE} min of this Bethel (closest is {meilleurTemps} min).
+                    This group may struggle to grow — consider reviewing its zone, or waiting for a closer candidate.
+                  </div>
+                );
+              })()}
+              {candidats.map((c) => (
               <div key={c.submission_id} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0",
                 borderBottom: "1px solid var(--border)",
@@ -1426,7 +1441,8 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
                   </button>
                 </div>
               </div>
-            ))
+              ))}
+            </>
           )}
         </div>
       )}
