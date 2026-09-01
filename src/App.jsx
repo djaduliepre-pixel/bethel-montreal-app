@@ -520,13 +520,15 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
     setSelectedZone(z);
     setZoneQuery("");
     setSelectedBethel(null);
-    var inZone = bethels.filter((b) => b.zone_id === z.zone_id);
-    setCandidates(inZone.map((b) => ({ bethel: b, minutes: null, error: null })));
+    // On ne limite plus aux Bethels de CETTE zone précise -- on cherche parmi
+    // TOUS les Bethels actifs avec une adresse, et on garde les plus proches
+    // en vrai temps de trajet, peu importe leur étiquette de zone.
+    var candidatsPossibles = bethels.filter((b) => b.address);
+    setCandidates(candidatsPossibles.map((b) => ({ bethel: b, minutes: null, error: null })));
 
-    if (submission.address && inZone.length > 0) {
+    if (submission.address && candidatsPossibles.length > 0) {
       setLoadingDistances(true);
-      var results = await Promise.all(inZone.map(async (b) => {
-        if (!b.address) return { bethel: b, minutes: null, error: "No address on file" };
+      var results = await Promise.all(candidatsPossibles.map(async (b) => {
         try {
           var minutes = await getDrivingMinutes(submission.address, b.address);
           return { bethel: b, minutes: minutes, error: null };
@@ -539,7 +541,7 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
         if (b.minutes == null) return -1;
         return a.minutes - b.minutes;
       });
-      setCandidates(results);
+      setCandidates(results.slice(0, 20)); // garde les 20 plus proches, peu importe la zone
       setLoadingDistances(false);
     }
   }
@@ -647,8 +649,26 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
               <label style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)", marginTop: "18px", display: "block" }}>
                 Step 2 — Choose a Bethel {loadingDistances && <span style={{ fontWeight: 400, color: "var(--ink-muted)" }}>(checking travel times…)</span>}
               </label>
+              <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "2px" }}>
+                Showing the closest Bethels overall, not limited to this zone's label.
+              </div>
+              {!loadingDistances && candidates.length > 0 && (() => {
+                const meilleurTemps = candidates.reduce((min, c) => (c.minutes != null && c.minutes < min ? c.minutes : min), Infinity);
+                if (meilleurTemps === Infinity || meilleurTemps <= LIMITE_MINUTES_PROXIMITE) return null;
+                return (
+                  <div style={{
+                    marginTop: "10px", padding: "10px 12px", borderRadius: "8px",
+                    background: "rgba(184,134,59,0.10)", border: "1px solid rgba(184,134,59,0.3)",
+                    fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.5,
+                  }}>
+                    ⚠️ No Bethel within {LIMITE_MINUTES_PROXIMITE} min was found (closest is {meilleurTemps} min).
+                    Consider whether <strong>{submission.first_name} {submission.last_name}</strong> might be a good
+                    candidate to host their own new Bethel instead, rather than assigning to a distant group.
+                  </div>
+                );
+              })()}
               {candidates.length === 0 && (
-                <div style={{ marginTop: "8px", fontSize: "13px", color: "var(--ink-muted)" }}>No active Bethels in this zone yet.</div>
+                <div style={{ marginTop: "8px", fontSize: "13px", color: "var(--ink-muted)" }}>No active Bethels with an address found.</div>
               )}
               <div style={{ marginTop: "8px" }}>
                 {candidates.map((c) => (
