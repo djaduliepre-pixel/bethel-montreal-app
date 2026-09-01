@@ -954,6 +954,12 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast, onOpenProfi
 /* ------------------------------------------------------------------ */
 /* Fenêtre : Profil complet d'un membre                                */
 /* ------------------------------------------------------------------ */
+const PROVINCES_CANADA = [
+  "Alberta", "Colombie-Britannique", "Île-du-Prince-Édouard", "Manitoba",
+  "Nouveau-Brunswick", "Nouvelle-Écosse", "Nunavut", "Ontario", "Québec",
+  "Saskatchewan", "Terre-Neuve-et-Labrador", "Territoires du Nord-Ouest", "Yukon",
+];
+
 function MemberProfileModal({ member, onClose, onSaved }) {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -971,6 +977,11 @@ function MemberProfileModal({ member, onClose, onSaved }) {
     previous_church: member.previous_church || "",
     baptized: member.baptized || false,
     baptism_date: member.baptism_date || "",
+    city: member.city || "",
+    province: member.province || "",
+    country: member.country || "Canada",
+    first_visit_date: member.first_visit_date || "",
+    church_integration_date: member.church_integration_date || "",
   });
 
   const inputStyle = {
@@ -1017,7 +1028,12 @@ function MemberProfileModal({ member, onClose, onSaved }) {
     try {
       // Les champs date vides doivent être envoyés comme "rien" (null),
       // jamais comme du texte vide "" -- sinon la base de données refuse.
-      const payload = { ...form, baptism_date: form.baptism_date || null };
+      const payload = {
+        ...form,
+        baptism_date: form.baptism_date || null,
+        first_visit_date: form.first_visit_date || null,
+        church_integration_date: form.church_integration_date || null,
+      };
       await supaPatch("members", `member_id=eq.${member.member_id}`, payload);
       setEditing(false);
       onSaved();
@@ -1071,6 +1087,9 @@ function MemberProfileModal({ member, onClose, onSaved }) {
                 Membership record
               </div>
               <Field label="Previous church / group" value={member.previous_church} />
+              <Field label="City, Province" value={member.city ? `${member.city}${member.province ? ", " + member.province : ""}` : null} />
+              <Field label="First visit date" value={member.first_visit_date} />
+              <Field label="Church integration date" value={member.church_integration_date} />
               <Field label="Baptized" value={member.baptized ? `Yes${member.baptism_date ? " — " + member.baptism_date : ""}` : "No"} />
 
               {(member.ananias_name || member.bethel_leader_name || member.overseer_name || member.ordained_minister_name) && (
@@ -1126,6 +1145,21 @@ function MemberProfileModal({ member, onClose, onSaved }) {
               <span style={labelStyle}>Address / Postal code</span>
               <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
               <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+
+              <span style={labelStyle}>Ville</span>
+              <input style={inputStyle} placeholder="Ville" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
+              <span style={labelStyle}>Province</span>
+              <select style={inputStyle} value={form.province} onChange={(e) => setForm((f) => ({ ...f, province: e.target.value }))}>
+                <option value="">— Choisir une province —</option>
+                {PROVINCES_CANADA.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <span style={labelStyle}>Pays</span>
+              <input style={inputStyle} placeholder="Pays" value={form.country} onChange={(e) => setForm((f) => ({ ...f, country: e.target.value }))} />
+              <span style={labelStyle}>Date de première visite</span>
+              <input type="date" style={inputStyle} value={form.first_visit_date} onChange={(e) => setForm((f) => ({ ...f, first_visit_date: e.target.value }))} />
+              <span style={labelStyle}>Date d'intégration à l'église</span>
+              <input type="date" style={inputStyle} value={form.church_integration_date} onChange={(e) => setForm((f) => ({ ...f, church_integration_date: e.target.value }))} />
+
               <span style={labelStyle}>Role</span>
               <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
                 {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
