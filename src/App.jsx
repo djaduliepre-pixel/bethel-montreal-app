@@ -239,6 +239,8 @@ const ZONE_PAR_FSA = {
   'J7K':'Mascouche Mascouche','J7L':'Mascouche Mascouche',
   'J6E':'Repentigny Repentigny', // L'Assomption/région -- meilleure approximation dispo
   'J6N':'Laval Auteuil', // Sainte-Thérèse/Blainville, proche Laval
+  'J6Z':'Terrebonne Terrebonne', // Lachenaie/Terrebonne
+  'J6':'Terrebonne Terrebonne', // repli large pour tout le reste de la famille J6 (Lanaudière)
   'G8':'Trois-Rivières Trois-Rivières','G9':'Trois-Rivières Trois-Rivières',
   'G0X':'Trois-Rivières Shawinigan',
   'G1V':'Région Sainte-Foy–Sillery–Cap-Rouge','G1W':'Région Sainte-Foy–Sillery–Cap-Rouge',
