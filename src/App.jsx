@@ -1309,12 +1309,18 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
     setLoading(true);
     setOpen(true);
     try {
-      const pendants = await supaGet(
-        "submissions",
-        "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"
-      );
+      const [pendants, membresActifs] = await Promise.all([
+        supaGet("submissions", "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"),
+        supaGet("members", "status=eq.active&select=first_name,last_name&limit=5000"),
+      ]);
+      // Exclut toute personne qui a une vieille soumission "Non" en attente,
+      // mais qui existe DÉJÀ comme membre actif ailleurs (ex: elle a dit "Non"
+      // il y a longtemps, puis "Oui" plus récemment et a déjà son propre Bethel).
+      const nomsDejaMembres = new Set(membresActifs.map((m) => normaliseNom(`${m.first_name} ${m.last_name}`)));
+      const pendantsFiltres = pendants.filter((p) => !nomsDejaMembres.has(normaliseNom(`${p.first_name} ${p.last_name}`)));
+
       const avecDistance = await Promise.all(
-        pendants.filter((p) => p.address).map(async (p) => {
+        pendantsFiltres.filter((p) => p.address).map(async (p) => {
           try {
             const minutes = await getDrivingMinutes(p.address, bethel.address);
             return { ...p, minutes, error: null };
