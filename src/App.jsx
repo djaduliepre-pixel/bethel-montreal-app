@@ -896,9 +896,9 @@ function MemberRow({ m, bethels, currentBethelId, onChanged, isLast, onOpenProfi
 
       {mode === "edit" && (
         <div style={{ marginTop: "10px", padding: "10px", background: "var(--bg)", borderRadius: "8px" }}>
-          <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+          <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formaterTelephone(e.target.value) }))} />
           <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
-          <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+          <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
           <div style={{ display: "flex", gap: "8px" }}>
             <button disabled={busy} onClick={saveEdit} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
               {busy ? "Saving…" : "Save"}
@@ -1138,13 +1138,13 @@ function MemberProfileModal({ member, onClose, onSaved }) {
                 <input style={inputStyle} value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
               </div>
               <span style={labelStyle}>Phone / Email</span>
-              <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+              <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formaterTelephone(e.target.value) }))} />
               <input style={inputStyle} placeholder="Email" value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
               <span style={labelStyle}>Gender</span>
               <input style={inputStyle} value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value }))} />
               <span style={labelStyle}>Address / Postal code</span>
               <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
-              <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+              <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
 
               <span style={labelStyle}>Ville</span>
               <input style={inputStyle} placeholder="Ville" value={form.city} onChange={(e) => setForm((f) => ({ ...f, city: e.target.value }))} />
@@ -1259,9 +1259,9 @@ function AddMemberForm({ bethelId, onAdded }) {
     <div style={{ marginTop: "12px", padding: "12px", background: "var(--bg)", borderRadius: "8px" }}>
       <input style={inputStyle} placeholder="First name" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
       <input style={inputStyle} placeholder="Last name" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
-      <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: e.target.value }))} />
+      <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formaterTelephone(e.target.value) }))} />
       <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
-      <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: e.target.value }))} />
+      <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
       <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
         {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
       </select>
@@ -2269,6 +2269,21 @@ function anneeFiscaleCourante() {
   const auj = new Date();
   const mois = auj.getMonth(); // 0=janvier ... 7=août
   return mois >= 7 ? auj.getFullYear() : auj.getFullYear() - 1;
+}
+
+// Formate un numéro de téléphone automatiquement en (514) 123-4567 pendant la saisie
+function formaterTelephone(valeur) {
+  const chiffres = valeur.replace(/\D/g, "").slice(0, 10);
+  if (chiffres.length <= 3) return chiffres;
+  if (chiffres.length <= 6) return `(${chiffres.slice(0, 3)}) ${chiffres.slice(3)}`;
+  return `(${chiffres.slice(0, 3)}) ${chiffres.slice(3, 6)}-${chiffres.slice(6)}`;
+}
+
+// Formate un code postal canadien en majuscules avec espace : H1G 4G6
+function formaterCodePostal(valeur) {
+  const propre = valeur.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6);
+  if (propre.length <= 3) return propre;
+  return `${propre.slice(0, 3)} ${propre.slice(3)}`;
 }
 
 function normaliseNom(s) {
