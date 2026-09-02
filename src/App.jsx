@@ -257,6 +257,7 @@ const ZONE_PAR_FSA = {
   'J8':'Sherbrooke Fleurimont', 'J9':'Sherbrooke Fleurimont',
   'J0':'Repentigny Repentigny', // codes ruraux J0xxxx, très variés -- vérifier manuellement
   // Winnipeg / Manitoba
+  'R5H':'Ste. Anne Ste. Anne',
   'R2K':'Winnipeg North Kildonan','R2G':'Winnipeg North End','R2W':'Winnipeg North End',
   'R3C':'Winnipeg City Centre (Centre-ville)','R3B':'Winnipeg City Centre (Centre-ville)',
   'R2H':'Winnipeg St. Boniface (secteur francophone)','R2M':'Winnipeg St. Boniface (secteur francophone)',
