@@ -2229,18 +2229,42 @@ function ZoneMismatchReport({ zones, onChanged }) {
     }
   }
 
+  const [corrigeantTout, setCorrigeantTout] = useState(false);
+  async function corrigerTout() {
+    setCorrigeantTout(true);
+    const corrigeables = mismatches.filter((m) => m.zoneSuggereeObj);
+    for (const m of corrigeables) {
+      try {
+        await supaPatch("bethels", `bethel_id=eq.${m.bethel.bethel_id}`, { zone_id: m.zoneSuggereeObj.zone_id });
+      } catch (e) { /* on continue même si une correction échoue */ }
+    }
+    setCorrigeantTout(false);
+    onChanged && onChanged();
+    scanner(); // re-scanne pour confirmer que tout est bien réglé
+  }
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
         <span style={{ fontSize: "13px", color: "var(--ink-muted)" }}>
           Compares each Bethel's assigned zone against what its postal code suggests.
         </span>
-        <button onClick={scanner} disabled={loading} style={{
-          display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "6px",
-          border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", color: "var(--ink-muted)", cursor: "pointer",
-        }}>
-          <RefreshCw size={12} /> Re-scan
-        </button>
+        <div style={{ display: "flex", gap: "8px" }}>
+          {mismatches.filter((m) => m.zoneSuggereeObj).length > 0 && (
+            <button onClick={corrigerTout} disabled={corrigeantTout || loading} style={{
+              display: "flex", alignItems: "center", gap: "5px", padding: "6px 14px", borderRadius: "6px",
+              border: "none", background: "var(--plum)", fontSize: "12px", fontWeight: 600, color: "#fff", cursor: "pointer",
+            }}>
+              {corrigeantTout ? "Fixing all…" : `Fix All (${mismatches.filter((m) => m.zoneSuggereeObj).length})`}
+            </button>
+          )}
+          <button onClick={scanner} disabled={loading} style={{
+            display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "6px",
+            border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", color: "var(--ink-muted)", cursor: "pointer",
+          }}>
+            <RefreshCw size={12} /> Re-scan
+          </button>
+        </div>
       </div>
 
       {loading ? (
