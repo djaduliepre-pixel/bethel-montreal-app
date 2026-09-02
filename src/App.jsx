@@ -2187,8 +2187,13 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
                       </button>
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                      {/* Un Bethel n'existe que parce que son leader a dit "Oui" -- toujours vrai par définition */}
-                      <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Yes</span>
+                      {b.leader_willing_to_host === true ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Yes</span>
+                      ) : b.leader_willing_to_host === false ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", background: "rgba(162,59,51,0.10)", padding: "2px 9px", borderRadius: "999px" }}>No</span>
+                      ) : (
+                        <span style={{ fontSize: "11px", color: "var(--ink-muted)" }} title="No matching submission found — likely one of the original 191 imported groups">—</span>
+                      )}
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
                       {count === 0 ? (
@@ -3653,19 +3658,24 @@ function BethelAdminPortalInner() {
       setMemberCounts(compteurs);
 
       const zoneById = Object.fromEntries(zonesData.map((z) => [z.zone_id, z]));
+      // Prépare un index par nom pour retrouver la vraie réponse (Oui/Non) de chaque leader
+      const submissionsParNom = {};
+      submissionsData.forEach((s) => {
+        const cle = normaliseNom(`${s.first_name} ${s.last_name}`);
+        if (!submissionsParNom[cle]) submissionsParNom[cle] = s;
+      });
+
       setBethels(bethelsRaw.map((b) => {
-        // Cherche le membre correspondant au nom du leader, pour savoir s'il a dit Oui ou Non
-        const membresDuGroupe = membresParBethel[b.bethel_id] || [];
-        const leaderMembre = membresDuGroupe.find((m) =>
-          normaliseNom(`${m.first_name} ${m.last_name}`) === normaliseNom(b.leader_name || "")
-        );
+        const soumissionDuLeader = submissionsParNom[normaliseNom(b.leader_name || "")];
         return {
           ...b,
           zone_name: zoneById[b.zone_id]?.zone_name || "Unknown zone",
           zone_code: zoneById[b.zone_id]?.zone_code || "",
           city_name: zoneById[b.zone_id]?.city_name || "",
           region: zoneById[b.zone_id]?.region || "",
-          leader_willing_to_host: leaderMembre ? leaderMembre.willing_to_host : null,
+          // null = aucune soumission trouvée pour ce leader (probablement un des 191 groupes
+          // importés au tout début, avant l'existence du formulaire numérique)
+          leader_willing_to_host: soumissionDuLeader ? soumissionDuLeader.willing_to_host : null,
         };
       }));
     } catch (e) {
