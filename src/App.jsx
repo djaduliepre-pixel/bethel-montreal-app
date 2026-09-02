@@ -2362,6 +2362,7 @@ function ZoneMismatchReport({ zones, onChanged }) {
 
 function DataGapsReport({ bethels }) {
   const [members, setMembers] = useState([]);
+  const [bethelsSansLeader, setBethelsSansLeader] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
 
@@ -2369,33 +2370,42 @@ function DataGapsReport({ bethels }) {
     (async () => {
       setLoading(true);
       try {
-        const [sansContact, sansAdresse] = await Promise.all([
+        const [sansContact, sansAdresse, sansEmail] = await Promise.all([
           supaGet("members", "or=(and(phone.is.null,email.is.null),and(phone.eq.,email.eq.))&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
           supaGet("members", "or=(address.is.null,address.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
+          supaGet("members", "or=(email.is.null,email.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
         ]);
         const parId = {};
-        sansContact.forEach((m) => { parId[m.member_id] = { ...m, exception: "missing_contact" }; });
+        // Priorité : missing_contact > missing_address > no_email (le plus grave écrase le moins grave)
+        sansEmail.forEach((m) => { parId[m.member_id] = { ...m, exception: "no_email" }; });
         sansAdresse.forEach((m) => {
-          if (parId[m.member_id]) parId[m.member_id].exception = "missing_contact"; // priorité au plus grave
-          else parId[m.member_id] = { ...m, exception: "missing_address" };
+          if (!parId[m.member_id] || parId[m.member_id].exception === "no_email") parId[m.member_id] = { ...m, exception: "missing_address" };
         });
+        sansContact.forEach((m) => { parId[m.member_id] = { ...m, exception: "missing_contact" }; });
         setMembers(Object.values(parId));
+
+        // Bethels sans leader (aucun leader_name, ou 0 membre du tout)
+        const sansLeader = (bethels || []).filter((b) => !b.leader_name || !b.leader_name.trim());
+        setBethelsSansLeader(sansLeader);
       } catch (e) {
         setMembers([]);
       } finally {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [bethels]);
 
   const bethelById = useMemo(() => Object.fromEntries(bethels.map((b) => [b.bethel_id, b])), [bethels]);
-  const filtered = filter === "all" ? members : members.filter((m) => m.exception === filter);
+  const filtered = filter === "no_leader" ? [] : filter === "all" ? members : members.filter((m) => m.exception === filter);
   const countContact = members.filter((m) => m.exception === "missing_contact").length;
   const countAddress = members.filter((m) => m.exception === "missing_address").length;
+  const countEmail = members.filter((m) => m.exception === "no_email").length;
+  const countNoLeader = bethelsSansLeader.length;
 
   const EXCEPTION_LABELS = {
     missing_contact: { label: "Missing contact", color: "var(--brick)" },
     missing_address: { label: "Missing address", color: "var(--gold)" },
+    no_email: { label: "No email", color: "var(--gold)" },
   };
 
   return (
@@ -2405,6 +2415,8 @@ function DataGapsReport({ bethels }) {
           { id: "all", label: `All (${members.length})` },
           { id: "missing_contact", label: `Missing contact (${countContact})` },
           { id: "missing_address", label: `Missing address (${countAddress})` },
+          { id: "no_email", label: `No email (${countEmail})` },
+          { id: "no_leader", label: `No leader (${countNoLeader})` },
         ].map((f) => (
           <button key={f.id} onClick={() => setFilter(f.id)} style={{
             padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
@@ -2417,6 +2429,31 @@ function DataGapsReport({ bethels }) {
         ))}
       </div>
 
+      {filter === "no_leader" ? (
+        bethelsSansLeader.length === 0 ? (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+            No Bethels missing a leader. 🎉
+          </div>
+        ) : (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
+            {bethelsSansLeader.map((b, i) => (
+              <div key={b.bethel_id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
+                borderBottom: i < bethelsSansLeader.length - 1 ? "1px solid var(--border)" : "none", background: "var(--surface)",
+              }}>
+                <div>
+                  <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{b.hp_number}</div>
+                  <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "2px" }}>{b.zone_name}</div>
+                </div>
+                <span style={{ fontSize: "11px", padding: "3px 10px", borderRadius: "999px", fontWeight: 600, background: "rgba(162,59,51,0.10)", color: "var(--brick)" }}>
+                  No leader
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      ) : (
+      <>
       {loading ? (
         <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Checking members…</div>
       ) : filtered.length === 0 ? (
@@ -2449,6 +2486,8 @@ function DataGapsReport({ bethels }) {
             );
           })}
         </div>
+      )}
+      </>
       )}
     </div>
   );
