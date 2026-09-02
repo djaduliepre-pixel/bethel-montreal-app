@@ -3,7 +3,7 @@ import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
 import {
   Home, Inbox, Users, BarChart3, MapPin, Search, Check, X,
   ChevronRight, Phone, AlertCircle, Sparkles, Plus, RefreshCw,
-  Edit2, ArrowRightLeft, Trash2, BookOpen,
+  Edit2, ArrowRightLeft, Trash2, BookOpen, Network,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -1613,6 +1613,190 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
 /* ------------------------------------------------------------------ */
 /* Vues                                                                */
 /* ------------------------------------------------------------------ */
+// Trouve la meilleure correspondance de nom parmi une liste restreinte de candidats
+// (ex: trouver quel "Overseer" correspond au texte tapé dans le champ "overseer_name").
+function trouveDansListe(nomTape, candidats) {
+  if (!nomTape || !nomTape.trim()) return null;
+  const mots = new Set(normaliseNom(nomTape).split(/\s+/).filter((w) => w.length > 1));
+  const seuil = mots.size >= 2 ? 2 : 1;
+  let meilleur = null, meilleurScore = 0;
+  for (const c of candidats) {
+    const motsNom = new Set(normaliseNom(`${c.first_name} ${c.last_name}`).split(/\s+/).filter((w) => w.length > 1));
+    let communs = 0;
+    for (const w of mots) if (motsNom.has(w)) communs++;
+    if (communs > meilleurScore) { meilleurScore = communs; meilleur = c; }
+  }
+  return meilleurScore >= seuil ? meilleur : null;
+}
+
+function OrgChartView() {
+  const [membres, setMembres] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [ouvert, setOuvert] = useState({});
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const data = await supaGet(
+          "members",
+          "status=eq.active&select=member_id,first_name,last_name,role,phone,email,ananias_name,bethel_leader_name,overseer_name,ordained_minister_name&limit=5000"
+        );
+        setMembres(data);
+      } catch (e) {
+        setMembres([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const arbre = useMemo(() => {
+    const ministres = membres.filter((m) => m.role === "Ministre Ordonné");
+    const overseers = membres.filter((m) => m.role === "Overseer");
+    const bethelLeaders = membres.filter((m) => m.role === "Bethel Leader");
+    const ananias = membres.filter((m) => m.role === "Ananias");
+
+    const overseersSansParent = [];
+    const overseersParMinistre = {}; // ministre.member_id -> [overseers]
+    overseers.forEach((o) => {
+      const parent = trouveDansListe(o.ordained_minister_name, ministres);
+      if (parent) {
+        overseersParMinistre[parent.member_id] = overseersParMinistre[parent.member_id] || [];
+        overseersParMinistre[parent.member_id].push(o);
+      } else {
+        overseersSansParent.push(o);
+      }
+    });
+
+    const blSansParent = [];
+    const blParOverseer = {};
+    bethelLeaders.forEach((bl) => {
+      const parent = trouveDansListe(bl.overseer_name, overseers);
+      if (parent) {
+        blParOverseer[parent.member_id] = blParOverseer[parent.member_id] || [];
+        blParOverseer[parent.member_id].push(bl);
+      } else {
+        blSansParent.push(bl);
+      }
+    });
+
+    const ananiasSansParent = [];
+    const ananiasParBL = {};
+    ananias.forEach((a) => {
+      const parent = trouveDansListe(a.bethel_leader_name, bethelLeaders);
+      if (parent) {
+        ananiasParBL[parent.member_id] = ananiasParBL[parent.member_id] || [];
+        ananiasParBL[parent.member_id].push(a);
+      } else {
+        ananiasSansParent.push(a);
+      }
+    });
+
+    return { ministres, overseersParMinistre, overseersSansParent, blParOverseer, blSansParent, ananiasParBL, ananiasSansParent };
+  }, [membres]);
+
+  function toggle(id) {
+    setOuvert((o) => ({ ...o, [id]: !o[id] }));
+  }
+
+  function LignePersonne({ personne, niveau, enfants, coteCouleur }) {
+    const aDesEnfants = enfants && enfants.length > 0;
+    const estOuvert = ouvert[personne.member_id];
+    return (
+      <div style={{ marginLeft: `${niveau * 22}px` }}>
+        <button
+          onClick={() => aDesEnfants && toggle(personne.member_id)}
+          style={{
+            display: "flex", alignItems: "center", gap: "8px", width: "100%", textAlign: "left",
+            padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)",
+            borderLeft: `3px solid ${coteCouleur}`, background: "var(--surface)", cursor: aDesEnfants ? "pointer" : "default",
+            marginBottom: "6px", fontFamily: "var(--font-body)",
+          }}
+        >
+          {aDesEnfants ? (
+            <ChevronRight size={13} color="var(--ink-muted)" style={{ transform: estOuvert ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }} />
+          ) : (
+            <span style={{ width: "13px", flexShrink: 0 }} />
+          )}
+          <div style={{ flex: 1 }}>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{personne.first_name} {personne.last_name}</span>
+            <span style={{ fontSize: "11px", color: "var(--ink-muted)", marginLeft: "8px" }}>{personne.role}</span>
+          </div>
+          {personne.phone && <span style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{personne.phone}</span>}
+          {aDesEnfants && <span style={{ fontSize: "11px", color: "var(--plum)", fontWeight: 600 }}>{enfants.length}</span>}
+        </button>
+      </div>
+    );
+  }
+
+  function BrancheMinistre({ ministre }) {
+    const enfants = arbre.overseersParMinistre[ministre.member_id] || [];
+    return (
+      <div>
+        <LignePersonne personne={ministre} niveau={0} enfants={enfants} coteCouleur="var(--plum)" />
+        {ouvert[ministre.member_id] && enfants.map((o) => <BrancheOverseer key={o.member_id} overseer={o} />)}
+      </div>
+    );
+  }
+
+  function BrancheOverseer({ overseer }) {
+    const enfants = arbre.blParOverseer[overseer.member_id] || [];
+    return (
+      <div>
+        <LignePersonne personne={overseer} niveau={1} enfants={enfants} coteCouleur="var(--teal)" />
+        {ouvert[overseer.member_id] && enfants.map((bl) => <BrancheBethelLeader key={bl.member_id} bl={bl} />)}
+      </div>
+    );
+  }
+
+  function BrancheBethelLeader({ bl }) {
+    const enfants = arbre.ananiasParBL[bl.member_id] || [];
+    return (
+      <div>
+        <LignePersonne personne={bl} niveau={2} enfants={enfants} coteCouleur="var(--gold)" />
+        {ouvert[bl.member_id] && enfants.map((a) => (
+          <div key={a.member_id} style={{ marginLeft: "66px" }}>
+            <LignePersonne personne={a} niveau={0} enfants={null} coteCouleur="var(--border)" />
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Org Chart</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
+        Auto-generated from each member's supervision chain fields. Click a row to expand.
+      </p>
+
+      {loading ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
+      ) : arbre.ministres.length === 0 ? (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+          No Ministre Ordonné found yet.
+        </div>
+      ) : (
+        <>
+          {arbre.ministres.map((m) => <BrancheMinistre key={m.member_id} ministre={m} />)}
+
+          {(arbre.overseersSansParent.length > 0 || arbre.blSansParent.length > 0 || arbre.ananiasSansParent.length > 0) && (
+            <div style={{ marginTop: "26px", paddingTop: "16px", borderTop: "1px solid var(--border)" }}>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "10px" }}>
+                ⚠️ Unassigned (no matching supervisor found)
+              </div>
+              {arbre.overseersSansParent.map((o) => <LignePersonne key={o.member_id} personne={o} niveau={0} enfants={null} coteCouleur="var(--brick)" />)}
+              {arbre.blSansParent.map((bl) => <LignePersonne key={bl.member_id} personne={bl} niveau={0} enfants={null} coteCouleur="var(--brick)" />)}
+              {arbre.ananiasSansParent.map((a) => <LignePersonne key={a.member_id} personne={a} niveau={0} enfants={null} coteCouleur="var(--brick)" />)}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function DashboardView({ submissions, bethels, zones, onNavigate }) {
   const pending = submissions.filter((s) => s.status === "pending").length;
   const willing = submissions.filter((s) => s.willing_to_host).length;
@@ -2335,6 +2519,7 @@ const NAV = [
   { id: "bethels", label: "Bethels", icon: Users },
   { id: "search", label: "Search Members", icon: Search },
   { id: "devotions", label: "Devotions", icon: BookOpen },
+  { id: "orgchart", label: "Org Chart", icon: Network },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "zones", label: "Zone Lookup", icon: MapPin },
 ];
@@ -3435,6 +3620,7 @@ function BethelAdminPortalInner() {
             {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
+            {view === "orgchart" && <OrgChartView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
