@@ -3704,15 +3704,28 @@ function BethelAdminPortalInner() {
       setMemberCounts(compteurs);
 
       const zoneById = Object.fromEntries(zonesData.map((z) => [z.zone_id, z]));
-      // Prépare un index par nom pour retrouver la vraie réponse (Oui/Non) de chaque leader
-      const submissionsParNom = {};
-      submissionsData.forEach((s) => {
-        const cle = normaliseNom(`${s.first_name} ${s.last_name}`);
-        if (!submissionsParNom[cle]) submissionsParNom[cle] = s;
-      });
+      // Prépare une liste de soumissions avec leurs mots de nom, pour une comparaison
+      // souple (peu importe l'ordre prénom/nom, ou un nom du milieu en trop).
+      const soumissionsAvecMots = submissionsData.map((s) => ({
+        ...s,
+        motsNom: new Set(normaliseNom(`${s.first_name} ${s.last_name}`).split(/\s+/).filter((w) => w.length > 1)),
+      }));
+
+      function trouveSoumissionDuLeader(nomLeader) {
+        const mots = new Set(normaliseNom(nomLeader).split(/\s+/).filter((w) => w.length > 1));
+        if (mots.size === 0) return null;
+        const seuil = mots.size >= 2 ? 2 : 1;
+        let meilleur = null, meilleurScore = 0;
+        for (const s of soumissionsAvecMots) {
+          let communs = 0;
+          for (const w of mots) if (s.motsNom.has(w)) communs++;
+          if (communs > meilleurScore) { meilleurScore = communs; meilleur = s; }
+        }
+        return meilleurScore >= seuil ? meilleur : null;
+      }
 
       setBethels(bethelsRaw.map((b) => {
-        const soumissionDuLeader = submissionsParNom[normaliseNom(b.leader_name || "")];
+        const soumissionDuLeader = trouveSoumissionDuLeader(b.leader_name || "");
         return {
           ...b,
           zone_name: zoneById[b.zone_id]?.zone_name || "Unknown zone",
