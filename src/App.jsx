@@ -2806,7 +2806,10 @@ function normaliseNom(s) {
     .toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z\s]/gi, "");
+    .replace(/[-_']/g, " ") // remplace tirets/apostrophes par un espace (ex: "Jean-Jacques" -> "Jean Jacques")
+    .replace(/[^a-z\s]/gi, "")
+    .replace(/\s+/g, " ") // évite les espaces doublés
+    .trim();
 }
 
 // Rapproche un nom soumis dans une dévotion avec la bonne fiche membre, avec la même
