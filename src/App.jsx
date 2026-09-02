@@ -2014,6 +2014,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState("all");
   const [villeChoisie, setVilleChoisie] = useState("all");
+  const [sousZoneChoisie, setSousZoneChoisie] = useState("all");
 
   const filtres = [
     { id: "all", label: "All" },
@@ -2031,12 +2032,24 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
     return Object.entries(compteurs).sort((a, b) => b[1] - a[1]); // triées par nombre décroissant
   }, [bethels]);
 
+  // Sous-zones précises (ex: "Laval Chomedey", "Laval Vimont") disponibles UNE FOIS qu'une ville est choisie
+  const sousZones = useMemo(() => {
+    if (villeChoisie === "all") return [];
+    const compteurs = {};
+    bethels
+      .filter((b) => (b.city_name || b.zone_name) === villeChoisie)
+      .forEach((b) => { compteurs[b.zone_name] = (compteurs[b.zone_name] || 0) + 1; });
+    const entries = Object.entries(compteurs);
+    return entries.length > 1 ? entries.sort((a, b) => b[1] - a[1]) : []; // pas utile si une seule sous-zone
+  }, [bethels, villeChoisie]);
+
   const resultats = useMemo(() => {
     let liste = bethels;
     if (filtre === "needs_members") liste = liste.filter((b) => (memberCounts[b.bethel_id] || 0) === 0);
     if (filtre === "active") liste = liste.filter((b) => b.status !== "inactive");
     if (filtre === "inactive") liste = liste.filter((b) => b.status === "inactive");
     if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
+    if (sousZoneChoisie !== "all") liste = liste.filter((b) => b.zone_name === sousZoneChoisie);
 
     const q = recherche.trim().toLowerCase();
     if (q.length >= 1) {
@@ -2045,7 +2058,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
       );
     }
     return liste;
-  }, [bethels, memberCounts, filtre, recherche, villeChoisie]);
+  }, [bethels, memberCounts, filtre, recherche, villeChoisie, sousZoneChoisie]);
 
   return (
     <div>
@@ -2085,7 +2098,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
           Browse by city
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button onClick={() => setVilleChoisie("all")} style={{
+          <button onClick={() => { setVilleChoisie("all"); setSousZoneChoisie("all"); }} style={{
             padding: "5px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
             border: `1px solid ${villeChoisie === "all" ? "var(--teal)" : "var(--border)"}`,
             background: villeChoisie === "all" ? "rgba(31,92,78,0.10)" : "var(--surface)",
@@ -2094,7 +2107,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
             All cities
           </button>
           {villes.map(([ville, count]) => (
-            <button key={ville} onClick={() => setVilleChoisie(ville)} style={{
+            <button key={ville} onClick={() => { setVilleChoisie(ville); setSousZoneChoisie("all"); }} style={{
               padding: "5px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
               border: `1px solid ${villeChoisie === ville ? "var(--teal)" : "var(--border)"}`,
               background: villeChoisie === ville ? "rgba(31,92,78,0.10)" : "var(--surface)",
@@ -2104,6 +2117,34 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
             </button>
           ))}
         </div>
+
+        {sousZones.length > 0 && (
+          <div style={{ marginTop: "10px" }}>
+            <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
+              Narrow by neighborhood
+            </div>
+            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+              <button onClick={() => setSousZoneChoisie("all")} style={{
+                padding: "4px 10px", borderRadius: "999px", fontSize: "11.5px", fontWeight: 600,
+                border: `1px solid ${sousZoneChoisie === "all" ? "var(--gold)" : "var(--border)"}`,
+                background: sousZoneChoisie === "all" ? "rgba(184,134,59,0.10)" : "var(--surface)",
+                color: sousZoneChoisie === "all" ? "var(--gold)" : "var(--ink-muted)", cursor: "pointer",
+              }}>
+                All neighborhoods
+              </button>
+              {sousZones.map(([sz, count]) => (
+                <button key={sz} onClick={() => setSousZoneChoisie(sz)} style={{
+                  padding: "4px 10px", borderRadius: "999px", fontSize: "11.5px", fontWeight: 600,
+                  border: `1px solid ${sousZoneChoisie === sz ? "var(--gold)" : "var(--border)"}`,
+                  background: sousZoneChoisie === sz ? "rgba(184,134,59,0.10)" : "var(--surface)",
+                  color: sousZoneChoisie === sz ? "var(--gold)" : "var(--ink-muted)", cursor: "pointer",
+                }}>
+                  {sz.replace(villeChoisie, "").trim() || sz} ({count})
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
 
@@ -2118,6 +2159,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
               <tr style={{ background: "var(--bg)" }}>
                 <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Church ID</th>
                 <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Leader</th>
+                <th style={{ textAlign: "center", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Willing?</th>
                 <th style={{ textAlign: "center", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Members</th>
                 <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Zone</th>
                 <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Status</th>
@@ -2143,6 +2185,15 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
                       >
                         {b.leader_name || "—"}
                       </button>
+                    </td>
+                    <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                      {b.leader_willing_to_host === true ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Yes</span>
+                      ) : b.leader_willing_to_host === false ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--gold)", background: "rgba(184,134,59,0.10)", padding: "2px 9px", borderRadius: "999px" }}>No</span>
+                      ) : (
+                        <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>—</span>
+                      )}
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
                       {count === 0 ? (
@@ -3591,24 +3642,37 @@ function BethelAdminPortalInner() {
         supaGet("campuses", "select=*&campus_code=eq.MTL"),
         supaGet("submissions", "select=*&order=submitted_at.desc&limit=5000"),
         supaGet("bethels", "select=*&status=eq.active&order=created_at.desc&limit=5000"),
-        supaGet("members", "select=bethel_id&status=eq.active&limit=5000"),
+        supaGet("members", "select=bethel_id,first_name,last_name,willing_to_host&status=eq.active&limit=5000"),
       ]);
       setZones(zonesData);
       if (campusesData[0]) setCampusId(campusesData[0].campus_id);
       setSubmissions(submissionsData);
 
       const compteurs = {};
-      membresLegers.forEach((m) => { compteurs[m.bethel_id] = (compteurs[m.bethel_id] || 0) + 1; });
+      const membresParBethel = {};
+      membresLegers.forEach((m) => {
+        compteurs[m.bethel_id] = (compteurs[m.bethel_id] || 0) + 1;
+        membresParBethel[m.bethel_id] = membresParBethel[m.bethel_id] || [];
+        membresParBethel[m.bethel_id].push(m);
+      });
       setMemberCounts(compteurs);
 
       const zoneById = Object.fromEntries(zonesData.map((z) => [z.zone_id, z]));
-      setBethels(bethelsRaw.map((b) => ({
-        ...b,
-        zone_name: zoneById[b.zone_id]?.zone_name || "Unknown zone",
-        zone_code: zoneById[b.zone_id]?.zone_code || "",
-        city_name: zoneById[b.zone_id]?.city_name || "",
-        region: zoneById[b.zone_id]?.region || "",
-      })));
+      setBethels(bethelsRaw.map((b) => {
+        // Cherche le membre correspondant au nom du leader, pour savoir s'il a dit Oui ou Non
+        const membresDuGroupe = membresParBethel[b.bethel_id] || [];
+        const leaderMembre = membresDuGroupe.find((m) =>
+          normaliseNom(`${m.first_name} ${m.last_name}`) === normaliseNom(b.leader_name || "")
+        );
+        return {
+          ...b,
+          zone_name: zoneById[b.zone_id]?.zone_name || "Unknown zone",
+          zone_code: zoneById[b.zone_id]?.zone_code || "",
+          city_name: zoneById[b.zone_id]?.city_name || "",
+          region: zoneById[b.zone_id]?.region || "",
+          leader_willing_to_host: leaderMembre ? leaderMembre.willing_to_host : null,
+        };
+      }));
     } catch (e) {
       setLoadError(e.message);
     } finally {
