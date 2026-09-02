@@ -219,7 +219,7 @@ const ZONE_PAR_FSA = {
   'H8N':'Montreal LaSalle','H8P':'Montreal LaSalle','H8R':'Montreal LaSalle',
   'H8S':'Montreal Lachine','H8T':'Montreal Lachine',
   'H4L':'Montreal Saint-Laurent','H4M':'Montreal Saint-Laurent','H4N':'Montreal Saint-Laurent','H4R':'Montreal Saint-Laurent',
-  'H2C':'Montreal Ahuntsic-Cartierville','H2M':'Montreal Ahuntsic-Cartierville',
+  'H2C':'Montreal Ahuntsic-Cartierville','H2M':'Montreal Ahuntsic-Cartierville','H2B':'Montreal Ahuntsic-Cartierville','H2N':'Montreal Ahuntsic-Cartierville',
   'H3L':'Montreal Ahuntsic-Cartierville','H3M':'Montreal Ahuntsic-Cartierville',
   'H4J':'Montreal Ahuntsic-Cartierville','H4K':'Montreal Ahuntsic-Cartierville',
   'H3E':'Montreal Verdun','H4G':'Montreal Verdun','H4H':'Montreal Verdun',
