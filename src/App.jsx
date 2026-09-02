@@ -234,7 +234,7 @@ const ZONE_PAR_FSA = {
   'H7M':'Laval Vimont','H7R':'Laval Laval-Ouest',
   'H7N':'Laval Pont-Viau','H7G':'Laval Pont-Viau',
   'H7S':'Laval Chomedey','H7T':'Laval Chomedey','H7V':'Laval Chomedey','H7W':'Laval Chomedey',
-  'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny',
+  'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny','J5W':'Repentigny Repentigny',
   'J6X':'Terrebonne Terrebonne','J6Y':'Terrebonne Terrebonne','J6V':'Terrebonne Terrebonne','J6W':'Terrebonne Terrebonne','J7M':'Terrebonne Terrebonne',
   'J7K':'Mascouche Mascouche','J7L':'Mascouche Mascouche',
   'J6E':'Repentigny Repentigny', // L'Assomption/région -- meilleure approximation dispo
