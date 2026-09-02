@@ -2021,6 +2021,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
     { id: "needs_members", label: "Needs Members" },
     { id: "active", label: "Active" },
     { id: "inactive", label: "Inactive" },
+    { id: "willing_yes", label: "Willing: Yes" },
+    { id: "willing_no", label: "Willing: No" },
   ];
 
   const villes = useMemo(() => {
@@ -2048,6 +2050,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
     if (filtre === "needs_members") liste = liste.filter((b) => (memberCounts[b.bethel_id] || 0) === 0);
     if (filtre === "active") liste = liste.filter((b) => b.status !== "inactive");
     if (filtre === "inactive") liste = liste.filter((b) => b.status === "inactive");
+    if (filtre === "willing_yes") liste = liste.filter((b) => b.leader_willing_to_host === true);
+    if (filtre === "willing_no") liste = liste.filter((b) => b.leader_willing_to_host === false);
     if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
     if (sousZoneChoisie !== "all") liste = liste.filter((b) => b.zone_name === sousZoneChoisie);
 
