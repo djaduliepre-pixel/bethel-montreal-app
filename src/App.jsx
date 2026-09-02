@@ -2012,6 +2012,7 @@ function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }
 function BethelsView({ bethels, memberCounts, onOpenDetail }) {
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState("all");
+  const [villeChoisie, setVilleChoisie] = useState("all");
 
   const filtres = [
     { id: "all", label: "All" },
@@ -2020,11 +2021,21 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
     { id: "inactive", label: "Inactive" },
   ];
 
+  const villes = useMemo(() => {
+    const compteurs = {};
+    bethels.forEach((b) => {
+      const v = b.city_name || b.zone_name || "Unknown";
+      compteurs[v] = (compteurs[v] || 0) + 1;
+    });
+    return Object.entries(compteurs).sort((a, b) => b[1] - a[1]); // triées par nombre décroissant
+  }, [bethels]);
+
   const resultats = useMemo(() => {
     let liste = bethels;
     if (filtre === "needs_members") liste = liste.filter((b) => (memberCounts[b.bethel_id] || 0) === 0);
     if (filtre === "active") liste = liste.filter((b) => b.status !== "inactive");
     if (filtre === "inactive") liste = liste.filter((b) => b.status === "inactive");
+    if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
 
     const q = recherche.trim().toLowerCase();
     if (q.length >= 1) {
@@ -2033,7 +2044,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
       );
     }
     return liste;
-  }, [bethels, memberCounts, filtre, recherche]);
+  }, [bethels, memberCounts, filtre, recherche, villeChoisie]);
 
   return (
     <div>
@@ -2055,7 +2066,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
         />
       </div>
 
-      <div style={{ display: "flex", gap: "6px", marginBottom: "16px", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" }}>
         {filtres.map((f) => (
           <button key={f.id} onClick={() => setFiltre(f.id)} style={{
             padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
@@ -2067,6 +2078,33 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
           </button>
         ))}
       </div>
+
+      <div style={{ marginBottom: "16px" }}>
+        <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
+          Browse by city
+        </div>
+        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+          <button onClick={() => setVilleChoisie("all")} style={{
+            padding: "5px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
+            border: `1px solid ${villeChoisie === "all" ? "var(--teal)" : "var(--border)"}`,
+            background: villeChoisie === "all" ? "rgba(31,92,78,0.10)" : "var(--surface)",
+            color: villeChoisie === "all" ? "var(--teal)" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            All cities
+          </button>
+          {villes.map(([ville, count]) => (
+            <button key={ville} onClick={() => setVilleChoisie(ville)} style={{
+              padding: "5px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
+              border: `1px solid ${villeChoisie === ville ? "var(--teal)" : "var(--border)"}`,
+              background: villeChoisie === ville ? "rgba(31,92,78,0.10)" : "var(--surface)",
+              color: villeChoisie === ville ? "var(--teal)" : "var(--ink-muted)", cursor: "pointer",
+            }}>
+              {ville} ({count})
+            </button>
+          ))}
+        </div>
+      </div>
+
 
       {resultats.length === 0 ? (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
@@ -3543,6 +3581,8 @@ function BethelAdminPortalInner() {
         ...b,
         zone_name: zoneById[b.zone_id]?.zone_name || "Unknown zone",
         zone_code: zoneById[b.zone_id]?.zone_code || "",
+        city_name: zoneById[b.zone_id]?.city_name || "",
+        region: zoneById[b.zone_id]?.region || "",
       })));
     } catch (e) {
       setLoadError(e.message);
