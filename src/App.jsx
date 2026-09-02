@@ -2187,13 +2187,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
                       </button>
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                      {b.leader_willing_to_host === true ? (
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Yes</span>
-                      ) : b.leader_willing_to_host === false ? (
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--gold)", background: "rgba(184,134,59,0.10)", padding: "2px 9px", borderRadius: "999px" }}>No</span>
-                      ) : (
-                        <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>—</span>
-                      )}
+                      {/* Un Bethel n'existe que parce que son leader a dit "Oui" -- toujours vrai par définition */}
+                      <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Yes</span>
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
                       {count === 0 ? (
