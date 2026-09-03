@@ -1655,7 +1655,9 @@ function SupervisionGridView() {
   const lignes = useMemo(() => {
     const ministres = membres.filter((m) => m.role === "Ministre Ordonné");
     const overseers = membres.filter((m) => m.role === "Overseer");
-    const bethelLeaders = membres.filter((m) => m.role === "Bethel Leader");
+    // Peu importe le rôle réel (Ananias, Bethel Leader, etc.) -- ce qui compte,
+    // c'est d'avoir un overseer_name rempli, exactement comme la position dans l'Excel.
+    const bethelLeaders = membres.filter((m) => m.overseer_name && m.role !== "Overseer" && m.role !== "Ministre Ordonné");
 
     const resultat = [];
 
