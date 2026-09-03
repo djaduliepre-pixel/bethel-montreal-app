@@ -1630,6 +1630,105 @@ function trouveDansListe(nomTape, candidats) {
   return meilleurScore >= seuil ? meilleur : null;
 }
 
+function SupervisionGridView() {
+  const [membres, setMembres] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      try {
+        const data = await supaGet(
+          "members",
+          "status=eq.active&select=member_id,first_name,last_name,role,phone,overseer_name,ordained_minister_name&limit=5000"
+        );
+        setMembres(data);
+      } catch (e) {
+        setMembres([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const lignes = useMemo(() => {
+    const ministres = membres.filter((m) => m.role === "Ministre Ordonné");
+    const overseers = membres.filter((m) => m.role === "Overseer");
+    const bethelLeaders = membres.filter((m) => m.role === "Bethel Leader");
+
+    const resultat = [];
+
+    ministres.forEach((min) => {
+      const sesOverseers = overseers.filter((o) => trouveDansListe(o.ordained_minister_name, [min]));
+      if (sesOverseers.length === 0) {
+        resultat.push({ ministre: min, overseer: null, bl: null });
+        return;
+      }
+      sesOverseers.forEach((ov) => {
+        const sesBL = bethelLeaders.filter((bl) => trouveDansListe(bl.overseer_name, [ov]));
+        if (sesBL.length === 0) {
+          resultat.push({ ministre: min, overseer: ov, bl: null });
+        } else {
+          sesBL.forEach((bl) => resultat.push({ ministre: min, overseer: ov, bl }));
+        }
+      });
+    });
+
+    return resultat;
+  }, [membres]);
+
+  function Cellule({ personne }) {
+    if (!personne) return <td style={{ padding: "8px 12px", color: "var(--border)", fontSize: "12px" }}>—</td>;
+    return (
+      <td style={{ padding: "8px 12px", borderRight: "1px solid var(--border)" }}>
+        <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{personne.first_name} {personne.last_name}</div>
+        {personne.phone && <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{personne.phone}</div>}
+      </td>
+    );
+  }
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 4px" }}>
+        Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
+      </p>
+      <p style={{ color: "var(--ink-muted)", fontSize: "12px", margin: "0 0 20px" }}>
+        Note: Ministre Ordonné and Overseer roles don't require their own Bethel — this grid shows the reporting structure only.
+      </p>
+
+      {loading ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
+      ) : lignes.length === 0 ? (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+          No supervision links found yet.
+        </div>
+      ) : (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: "12.5px", width: "100%" }}>
+            <thead>
+              <tr style={{ background: "var(--bg)" }}>
+                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Ministre Ordonné</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Overseer</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase" }}>Bethel Leader</th>
+              </tr>
+            </thead>
+            <tbody>
+              {lignes.map((l, i) => (
+                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                  <Cellule personne={l.ministre} />
+                  <Cellule personne={l.overseer} />
+                  <Cellule personne={l.bl} />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function OrgChartView() {
   const [membres, setMembres] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -2784,6 +2883,7 @@ const NAV = [
   { id: "search", label: "Search Members", icon: Search },
   { id: "devotions", label: "Devotions", icon: BookOpen },
   { id: "orgchart", label: "Org Chart", icon: Network },
+  { id: "supervision", label: "Supervision Grid", icon: BarChart3 },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "zones", label: "Zone Lookup", icon: MapPin },
 ];
@@ -3921,6 +4021,7 @@ function BethelAdminPortalInner() {
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
             {view === "orgchart" && <OrgChartView />}
+            {view === "supervision" && <SupervisionGridView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} zones={zones} onChanged={loadAll} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
