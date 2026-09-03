@@ -1641,7 +1641,7 @@ function SupervisionGridView() {
       try {
         const data = await supaGet(
           "members",
-          "status=eq.active&select=member_id,first_name,last_name,role,phone,bethel_id,overseer_name,ordained_minister_name&limit=5000"
+          "status=eq.active&select=member_id,first_name,last_name,role,phone,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000"
         );
         setMembres(data);
       } catch (e) {
@@ -1692,6 +1692,8 @@ function SupervisionGridView() {
       <td style={{ padding: "8px 12px", borderRight: "1px solid var(--border)" }}>
         <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{personne.first_name} {personne.last_name}</div>
         {personne.phone && <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{personne.phone}</div>}
+        {personne.city && <div style={{ fontSize: "10.5px", color: "var(--gold)", fontWeight: 600, marginTop: "2px" }}>📍 {personne.city}</div>}
+        {personne.address && <div style={{ fontSize: "10px", color: "var(--ink-muted)" }}>{personne.address}{personne.postal_code ? `, ${personne.postal_code}` : ""}</div>}
       </td>
     );
   }
