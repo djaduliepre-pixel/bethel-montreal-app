@@ -1633,6 +1633,7 @@ function trouveDansListe(nomTape, candidats) {
 function SupervisionGridView() {
   const [membres, setMembres] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [ouvert, setOuvert] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -1640,7 +1641,7 @@ function SupervisionGridView() {
       try {
         const data = await supaGet(
           "members",
-          "status=eq.active&select=member_id,first_name,last_name,role,phone,overseer_name,ordained_minister_name&limit=5000"
+          "status=eq.active&select=member_id,first_name,last_name,role,phone,bethel_id,overseer_name,ordained_minister_name&limit=5000"
         );
         setMembres(data);
       } catch (e) {
@@ -1669,7 +1670,13 @@ function SupervisionGridView() {
         if (sesBL.length === 0) {
           resultat.push({ ministre: min, overseer: ov, bl: null });
         } else {
-          sesBL.forEach((bl) => resultat.push({ ministre: min, overseer: ov, bl }));
+          sesBL.forEach((bl) => {
+            // Les vrais membres du foyer de ce Bethel Leader -- via bethel_id réel, jamais deviné par zone
+            const vraisMembers = membres.filter(
+              (m) => m.bethel_id === bl.bethel_id && m.member_id !== bl.member_id
+            );
+            resultat.push({ ministre: min, overseer: ov, bl, membres: vraisMembers });
+          });
         }
       });
     });
@@ -1694,7 +1701,7 @@ function SupervisionGridView() {
         Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
       </p>
       <p style={{ color: "var(--ink-muted)", fontSize: "12px", margin: "0 0 20px" }}>
-        Note: Ministre Ordonné and Overseer roles don't require their own Bethel — this grid shows the reporting structure only.
+        Members shown are each Bethel Leader's real household (via bethel_id) — never guessed from zone/proximity.
       </p>
 
       {loading ? (
@@ -1710,17 +1717,45 @@ function SupervisionGridView() {
               <tr style={{ background: "var(--bg)" }}>
                 <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Ministre Ordonné</th>
                 <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Overseer</th>
-                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase" }}>Bethel Leader</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Bethel Leader</th>
+                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase" }}>Members</th>
               </tr>
             </thead>
             <tbody>
-              {lignes.map((l, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                  <Cellule personne={l.ministre} />
-                  <Cellule personne={l.overseer} />
-                  <Cellule personne={l.bl} />
-                </tr>
-              ))}
+              {lignes.map((l, i) => {
+                const cle = l.bl ? l.bl.member_id : `sans-bl-${i}`;
+                const estOuvert = ouvert[cle];
+                const nbMembres = l.membres ? l.membres.length : 0;
+                return (
+                  <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                    <Cellule personne={l.ministre} />
+                    <Cellule personne={l.overseer} />
+                    <Cellule personne={l.bl} />
+                    <td style={{ padding: "8px 12px" }}>
+                      {nbMembres === 0 ? (
+                        <span style={{ fontSize: "11px", color: "var(--border)" }}>—</span>
+                      ) : (
+                        <button
+                          onClick={() => setOuvert((o) => ({ ...o, [cle]: !o[cle] }))}
+                          style={{
+                            background: "none", border: "none", cursor: "pointer", padding: 0,
+                            fontSize: "12px", color: "var(--plum)", fontWeight: 600, fontFamily: "var(--font-body)",
+                          }}
+                        >
+                          {nbMembres} member{nbMembres > 1 ? "s" : ""} {estOuvert ? "▲" : "▼"}
+                        </button>
+                      )}
+                      {estOuvert && (
+                        <div style={{ marginTop: "6px", fontSize: "11.5px", color: "var(--ink-muted)", lineHeight: 1.8 }}>
+                          {l.membres.map((m) => (
+                            <div key={m.member_id}>{m.first_name} {m.last_name}{m.phone ? ` — ${m.phone}` : ""}</div>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
