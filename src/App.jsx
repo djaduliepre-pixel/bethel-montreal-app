@@ -20,6 +20,29 @@ async function supaGet(table, query = "") {
   return res.json();
 }
 
+// Supabase impose un plafond serveur de 1000 lignes par requête, peu importe le
+// "limit" demandé côté client -- cette fonction boucle avec Range/offset pour
+// vraiment tout récupérer (utile pour les tables comme "members" qui dépassent 1000).
+async function supaGetTout(table, query = "") {
+  const TAILLE_PAGE = 1000;
+  let tout = [];
+  let debut = 0;
+  while (true) {
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
+      headers: {
+        apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`,
+        Range: `${debut}-${debut + TAILLE_PAGE - 1}`,
+      },
+    });
+    if (!res.ok) throw new Error(`GET ${table} failed: ${res.status}`);
+    const page = await res.json();
+    tout = tout.concat(page);
+    if (page.length < TAILLE_PAGE) break; // dernière page atteinte
+    debut += TAILLE_PAGE;
+  }
+  return tout;
+}
+
 async function supaPost(table, body) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}`, {
     method: "POST",
@@ -1323,7 +1346,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
     try {
       const [pendants, membresActifs] = await Promise.all([
         supaGet("submissions", "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"),
-        supaGet("members", "status=eq.active&select=first_name,last_name&limit=5000"),
+        supaGetTout("members", "status=eq.active&select=first_name,last_name"),
       ]);
       // Exclut toute personne qui a une vieille soumission "Non" en attente,
       // mais qui existe DÉJÀ comme membre actif ailleurs (ex: elle a dit "Non"
@@ -1639,7 +1662,7 @@ function SupervisionGridView() {
       setLoading(true);
       try {
         const [membresData, bethelsData, zonesData] = await Promise.all([
-          supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000"),
+          supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name"),
           supaGet("bethels", "select=bethel_id,zone_id&status=eq.active&limit=5000"),
           supaGet("data_zones", "select=zone_id,zone_name&is_active=eq.true"),
         ]);
@@ -1734,7 +1757,7 @@ function SupervisionGridView() {
       setMessage({ type: "ok", text: `Linked ${nomPersonne} → ${nomSuperviseur}` });
       setNomPersonne(""); setNomSuperviseur("");
       // Recharge
-      const data = await supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000");
+      const data = await supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name");
       setMembres((prev) => data.map((m) => {
         const ancien = prev.find((p) => p.member_id === m.member_id);
         return { ...m, zoneReelle: ancien ? ancien.zoneReelle : m.city || "" };
@@ -1779,12 +1802,6 @@ function SupervisionGridView() {
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>
         Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
-      </p>
-      <p style={{ color: "var(--brick)", fontSize: "11px", fontFamily: "var(--font-mono)", margin: "0 0 14px", background: "rgba(184,134,59,0.08)", padding: "6px 10px", borderRadius: "6px" }}>
-        DEBUG: {membres.length} membres chargés · {membres.filter((m) => m.role === "Bethel Leader" || m.role === "Ananias").length} avec rôle BL/Ananias ·
-        {" "}{membres.filter((m) => m.overseer_name).length} avec overseer_name rempli ·
-        {" "}Deloris trouvée: {membres.some((m) => m.first_name?.includes("Deloris")) ? "OUI" : "NON"} ·
-        {" "}Casulmane trouvée: {membres.some((m) => m.first_name?.includes("Casulmane")) ? "OUI" : "NON"}
       </p>
 
       {!formOuvert ? (
@@ -2617,9 +2634,9 @@ function DataGapsReport({ bethels }) {
       setLoading(true);
       try {
         const [sansContact, sansAdresse, sansEmail] = await Promise.all([
-          supaGet("members", "or=(and(phone.is.null,email.is.null),and(phone.eq.,email.eq.))&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
-          supaGet("members", "or=(address.is.null,address.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
-          supaGet("members", "or=(email.is.null,email.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id&limit=5000"),
+          supaGetTout("members", "or=(and(phone.is.null,email.is.null),and(phone.eq.,email.eq.))&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
+          supaGetTout("members", "or=(address.is.null,address.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
+          supaGetTout("members", "or=(email.is.null,email.eq.)&status=eq.active&select=member_id,first_name,last_name,phone,email,address,bethel_id"),
         ]);
         const parId = {};
         // Priorité : missing_contact > missing_address > no_email (le plus grave écrase le moins grave)
@@ -3599,7 +3616,7 @@ function DevotionsView() {
     try {
       const [devs, mems] = await Promise.all([
         supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date&limit=5000`),
-        supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone&limit=5000"),
+        supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone"),
       ]);
       setDevotions(devs);
       setMembers(mems);
@@ -3966,7 +3983,7 @@ function BethelAdminPortalInner() {
         supaGet("campuses", "select=*&campus_code=eq.MTL"),
         supaGet("submissions", "select=*&order=submitted_at.desc&limit=5000"),
         supaGet("bethels", "select=*&status=eq.active&order=created_at.desc&limit=5000"),
-        supaGet("members", "select=bethel_id,first_name,last_name,willing_to_host&status=eq.active&limit=5000"),
+        supaGetTout("members", "select=bethel_id,first_name,last_name,willing_to_host&status=eq.active"),
       ]);
       setZones(zonesData);
       if (campusesData[0]) setCampusId(campusesData[0].campus_id);
