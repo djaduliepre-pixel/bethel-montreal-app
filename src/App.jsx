@@ -1665,22 +1665,66 @@ function SupervisionGridView() {
 
     ministres.forEach((min) => {
       const sesOverseers = overseers.filter((o) => trouveDansListe(o.ordained_minister_name, [min]));
-      if (sesOverseers.length === 0) {
-        resultat.push({ ministre: min, overseer: null, bl: null });
-        return;
-      }
+      // On ignore les Ministres qui n'ont encore AUCUN Overseer relié -- rien d'utile à montrer
+      if (sesOverseers.length === 0) return;
+
+      let premiereLigneDuBloc = true;
       sesOverseers.forEach((ov) => {
         const sesBL = bethelLeaders.filter((bl) => trouveDansListe(bl.overseer_name, [ov]));
         if (sesBL.length === 0) {
-          resultat.push({ ministre: min, overseer: ov, bl: null });
+          resultat.push({ ministre: min, overseer: ov, bl: null, nouveauBloc: premiereLigneDuBloc });
+          premiereLigneDuBloc = false;
         } else {
-          sesBL.forEach((bl) => resultat.push({ ministre: min, overseer: ov, bl }));
+          sesBL.forEach((bl) => {
+            resultat.push({ ministre: min, overseer: ov, bl, nouveauBloc: premiereLigneDuBloc });
+            premiereLigneDuBloc = false;
+          });
         }
       });
     });
 
     return resultat;
   }, [membres]);
+
+  // --- Petit formulaire pour ajouter/modifier un lien de supervision directement ici ---
+  const [formOuvert, setFormOuvert] = useState(false);
+  const [nomPersonne, setNomPersonne] = useState("");
+  const [nomSuperviseur, setNomSuperviseur] = useState("");
+  const [typeLien, setTypeLien] = useState("overseer_name");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState(null);
+
+  async function enregistrerLien() {
+    if (!nomPersonne.trim() || !nomSuperviseur.trim()) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const mots = nomPersonne.trim().split(/\s+/);
+      const prenom = mots[0], nom = mots.slice(1).join(" ") || mots[0];
+      const existants = await supaGet(
+        "members",
+        `first_name=ilike.*${encodeURIComponent(prenom)}*&last_name=ilike.*${encodeURIComponent(nom)}*&status=eq.active&select=member_id`
+      );
+      if (existants.length === 0) {
+        setMessage({ type: "error", text: `No member found matching "${nomPersonne}".` });
+        setBusy(false);
+        return;
+      }
+      await supaPatch("members", `member_id=eq.${existants[0].member_id}`, { [typeLien]: nomSuperviseur.trim() });
+      setMessage({ type: "ok", text: `Linked ${nomPersonne} → ${nomSuperviseur}` });
+      setNomPersonne(""); setNomSuperviseur("");
+      // Recharge
+      const data = await supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000");
+      setMembres((prev) => data.map((m) => {
+        const ancien = prev.find((p) => p.member_id === m.member_id);
+        return { ...m, zoneReelle: ancien ? ancien.zoneReelle : m.city || "" };
+      }));
+    } catch (e) {
+      setMessage({ type: "error", text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   // 6 colonnes séparées par personne, identique au Google Sheets : Prénom, Nom, Téléphone, Courriel, Zone, Adresse
   function Cellules({ personne }) {
@@ -1713,9 +1757,49 @@ function SupervisionGridView() {
   return (
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>
         Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
       </p>
+
+      {!formOuvert ? (
+        <button onClick={() => setFormOuvert(true)} style={{
+          display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px",
+          border: "1px solid var(--border)", background: "transparent", color: "var(--ink-muted)", fontSize: "13px",
+          fontWeight: 600, cursor: "pointer", marginBottom: "16px",
+        }}>
+          <Plus size={14} /> Add / update a supervision link
+        </button>
+      ) : (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "16px", background: "var(--surface)", marginBottom: "16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Add or update a supervision link</span>
+            <button onClick={() => setFormOuvert(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
+          </div>
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <input placeholder="Person's name (e.g. Suze Wilda Eline)" value={nomPersonne} onChange={(e) => setNomPersonne(e.target.value)}
+              style={{ padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", width: "220px" }} />
+            <select value={typeLien} onChange={(e) => setTypeLien(e.target.value)}
+              style={{ padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px" }}>
+              <option value="overseer_name">is supervised by (Overseer)</option>
+              <option value="ordained_minister_name">is supervised by (Ministre Ordonné)</option>
+            </select>
+            <input placeholder="Supervisor's name (e.g. Casulmane Angrand)" value={nomSuperviseur} onChange={(e) => setNomSuperviseur(e.target.value)}
+              style={{ padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", width: "220px" }} />
+            <button disabled={busy || !nomPersonne.trim() || !nomSuperviseur.trim()} onClick={enregistrerLien} style={{
+              padding: "7px 16px", borderRadius: "6px", border: "none",
+              background: (nomPersonne.trim() && nomSuperviseur.trim()) ? "var(--plum)" : "var(--border)",
+              color: "#fff", fontSize: "12.5px", fontWeight: 600, cursor: "pointer",
+            }}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+          </div>
+          {message && (
+            <div style={{ marginTop: "8px", fontSize: "12px", color: message.type === "ok" ? "var(--teal)" : "var(--brick)" }}>
+              {message.type === "ok" ? "✓ " : "⚠️ "}{message.text}
+            </div>
+          )}
+        </div>
+      )}
 
       {loading ? (
         <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
@@ -1747,7 +1831,7 @@ function SupervisionGridView() {
             </thead>
             <tbody>
               {lignes.map((l, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                <tr key={i} style={{ borderTop: l.nouveauBloc && i > 0 ? "3px solid var(--plum)" : "1px solid var(--border)" }}>
                   <Cellules personne={l.ministre} />
                   <Cellules personne={l.overseer} />
                   <Cellules personne={l.bl} />
