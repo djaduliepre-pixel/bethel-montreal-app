@@ -1633,7 +1633,6 @@ function trouveDansListe(nomTape, candidats) {
 function SupervisionGridView() {
   const [membres, setMembres] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [ouvert, setOuvert] = useState({});
 
   useEffect(() => {
     (async () => {
@@ -1641,7 +1640,7 @@ function SupervisionGridView() {
       try {
         const data = await supaGet(
           "members",
-          "status=eq.active&select=member_id,first_name,last_name,role,phone,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000"
+          "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000"
         );
         setMembres(data);
       } catch (e) {
@@ -1655,8 +1654,6 @@ function SupervisionGridView() {
   const lignes = useMemo(() => {
     const ministres = membres.filter((m) => m.role === "Ministre Ordonné");
     const overseers = membres.filter((m) => m.role === "Overseer");
-    // Peu importe le rôle réel (Ananias, Bethel Leader, etc.) -- ce qui compte,
-    // c'est d'avoir un overseer_name rempli, exactement comme la position dans l'Excel.
     const bethelLeaders = membres.filter((m) => m.overseer_name && m.role !== "Overseer" && m.role !== "Ministre Ordonné");
 
     const resultat = [];
@@ -1672,13 +1669,7 @@ function SupervisionGridView() {
         if (sesBL.length === 0) {
           resultat.push({ ministre: min, overseer: ov, bl: null });
         } else {
-          sesBL.forEach((bl) => {
-            // Les vrais membres du foyer de ce Bethel Leader -- via bethel_id réel, jamais deviné par zone
-            const vraisMembers = membres.filter(
-              (m) => m.bethel_id === bl.bethel_id && m.member_id !== bl.member_id
-            );
-            resultat.push({ ministre: min, overseer: ov, bl, membres: vraisMembers });
-          });
+          sesBL.forEach((bl) => resultat.push({ ministre: min, overseer: ov, bl }));
         }
       });
     });
@@ -1686,26 +1677,39 @@ function SupervisionGridView() {
     return resultat;
   }, [membres]);
 
-  function Cellule({ personne }) {
-    if (!personne) return <td style={{ padding: "8px 12px", color: "var(--border)", fontSize: "12px" }}>—</td>;
+  // 6 colonnes séparées par personne, identique au Google Sheets : Prénom, Nom, Téléphone, Courriel, Zone, Adresse
+  function Cellules({ personne }) {
+    if (!personne) {
+      return (
+        <>
+          <td style={{ padding: "5px 8px", borderRight: "1px solid var(--border)" }}></td>
+          <td style={{ padding: "5px 8px", borderRight: "1px solid var(--border)" }}></td>
+          <td style={{ padding: "5px 8px", borderRight: "1px solid var(--border)" }}></td>
+          <td style={{ padding: "5px 8px", borderRight: "1px solid var(--border)" }}></td>
+          <td style={{ padding: "5px 8px", borderRight: "1px solid var(--border)" }}></td>
+          <td style={{ padding: "5px 8px", borderRight: "2px solid var(--ink-muted)" }}></td>
+        </>
+      );
+    }
     return (
-      <td style={{ padding: "8px 12px", borderRight: "1px solid var(--border)" }}>
-        <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{personne.first_name} {personne.last_name}</div>
-        {personne.phone && <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{personne.phone}</div>}
-        {personne.city && <div style={{ fontSize: "10.5px", color: "var(--gold)", fontWeight: 600, marginTop: "2px" }}>📍 {personne.city}</div>}
-        {personne.address && <div style={{ fontSize: "10px", color: "var(--ink-muted)" }}>{personne.address}{personne.postal_code ? `, ${personne.postal_code}` : ""}</div>}
-      </td>
+      <>
+        <td style={{ padding: "5px 8px", fontSize: "12px", color: "var(--ink)" }}>{personne.first_name}</td>
+        <td style={{ padding: "5px 8px", fontSize: "12px", color: "var(--ink)" }}>{personne.last_name}</td>
+        <td style={{ padding: "5px 8px", fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{personne.phone || ""}</td>
+        <td style={{ padding: "5px 8px", fontSize: "11px", color: "var(--ink-muted)" }}>{personne.email || ""}</td>
+        <td style={{ padding: "5px 8px", fontSize: "11.5px", color: "var(--ink)" }}>{personne.city || ""}</td>
+        <td style={{ padding: "5px 8px", fontSize: "11px", color: "var(--ink-muted)", borderRight: "2px solid var(--ink-muted)" }}>
+          {personne.address || ""}{personne.postal_code ? `, ${personne.postal_code}` : ""}
+        </td>
+      </>
     );
   }
 
   return (
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 4px" }}>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
         Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
-      </p>
-      <p style={{ color: "var(--ink-muted)", fontSize: "12px", margin: "0 0 20px" }}>
-        Members shown are each Bethel Leader's real household (via bethel_id) — never guessed from zone/proximity.
       </p>
 
       {loading ? (
@@ -1716,50 +1720,34 @@ function SupervisionGridView() {
         </div>
       ) : (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
-          <table style={{ borderCollapse: "collapse", fontSize: "12.5px", width: "100%" }}>
+          <table style={{ borderCollapse: "collapse", fontSize: "12px", width: "100%" }}>
             <thead>
               <tr style={{ background: "var(--bg)" }}>
-                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Ministre Ordonné</th>
-                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Overseer</th>
-                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", borderRight: "1px solid var(--border)" }}>Bethel Leader</th>
-                <th style={{ textAlign: "left", padding: "8px 12px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase" }}>Members</th>
+                <th colSpan={6} style={{ textAlign: "center", padding: "6px", color: "var(--plum)", fontSize: "11px", textTransform: "uppercase", borderRight: "2px solid var(--ink-muted)", borderBottom: "1px solid var(--border)" }}>Minister Infos</th>
+                <th colSpan={6} style={{ textAlign: "center", padding: "6px", color: "var(--teal)", fontSize: "11px", textTransform: "uppercase", borderRight: "2px solid var(--ink-muted)", borderBottom: "1px solid var(--border)" }}>Overseer Infos</th>
+                <th colSpan={6} style={{ textAlign: "center", padding: "6px", color: "var(--gold)", fontSize: "11px", textTransform: "uppercase", borderBottom: "1px solid var(--border)" }}>Bethel Leader Infos</th>
+              </tr>
+              <tr style={{ background: "var(--bg)" }}>
+                {[1, 2, 3].map((bloc) => (
+                  <React.Fragment key={bloc}>
+                    <th style={{ padding: "5px 8px", color: "var(--ink-muted)", fontSize: "10px", textTransform: "uppercase" }}>First Name</th>
+                    <th style={{ padding: "5px 8px", color: "var(--ink-muted)", fontSize: "10px", textTransform: "uppercase" }}>Last Name</th>
+                    <th style={{ padding: "5px 8px", color: "var(--ink-muted)", fontSize: "10px", textTransform: "uppercase" }}>Phone#</th>
+                    <th style={{ padding: "5px 8px", color: "var(--ink-muted)", fontSize: "10px", textTransform: "uppercase" }}>Email</th>
+                    <th style={{ padding: "5px 8px", color: "var(--ink-muted)", fontSize: "10px", textTransform: "uppercase" }}>Zone</th>
+                    <th style={{ padding: "5px 8px", color: "var(--ink-muted)", fontSize: "10px", textTransform: "uppercase", borderRight: bloc < 3 ? "2px solid var(--ink-muted)" : "none" }}>Address</th>
+                  </React.Fragment>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {lignes.map((l, i) => {
-                const cle = l.bl ? l.bl.member_id : `sans-bl-${i}`;
-                const estOuvert = ouvert[cle];
-                const nbMembres = l.membres ? l.membres.length : 0;
-                return (
-                  <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                    <Cellule personne={l.ministre} />
-                    <Cellule personne={l.overseer} />
-                    <Cellule personne={l.bl} />
-                    <td style={{ padding: "8px 12px" }}>
-                      {nbMembres === 0 ? (
-                        <span style={{ fontSize: "11px", color: "var(--border)" }}>—</span>
-                      ) : (
-                        <button
-                          onClick={() => setOuvert((o) => ({ ...o, [cle]: !o[cle] }))}
-                          style={{
-                            background: "none", border: "none", cursor: "pointer", padding: 0,
-                            fontSize: "12px", color: "var(--plum)", fontWeight: 600, fontFamily: "var(--font-body)",
-                          }}
-                        >
-                          {nbMembres} member{nbMembres > 1 ? "s" : ""} {estOuvert ? "▲" : "▼"}
-                        </button>
-                      )}
-                      {estOuvert && (
-                        <div style={{ marginTop: "6px", fontSize: "11.5px", color: "var(--ink-muted)", lineHeight: 1.8 }}>
-                          {l.membres.map((m) => (
-                            <div key={m.member_id}>{m.first_name} {m.last_name}{m.phone ? ` — ${m.phone}` : ""}</div>
-                          ))}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+              {lignes.map((l, i) => (
+                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+                  <Cellules personne={l.ministre} />
+                  <Cellules personne={l.overseer} />
+                  <Cellules personne={l.bl} />
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -2505,6 +2493,7 @@ function ZoneMismatchReport({ zones, onChanged }) {
 function DataGapsReport({ bethels }) {
   const [members, setMembers] = useState([]);
   const [bethelsSansLeader, setBethelsSansLeader] = useState([]);
+  const [zonesNonVerifiees, setZonesNonVerifiees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
 
@@ -2529,6 +2518,13 @@ function DataGapsReport({ bethels }) {
         // Bethels sans leader (aucun leader_name, ou 0 membre du tout)
         const sansLeader = (bethels || []).filter((b) => !b.leader_name || !b.leader_name.trim());
         setBethelsSansLeader(sansLeader);
+
+        // Bethels avec une zone assignée mais AUCUNE vraie adresse -- la zone est donc
+        // juste héritée d'un ancien numéro/préfixe, jamais confirmée par une vraie adresse.
+        const nonVerifies = (bethels || []).filter(
+          (b) => !b.address || !b.address.trim() || b.address === "Adresse à confirmer"
+        );
+        setZonesNonVerifiees(nonVerifies);
       } catch (e) {
         setMembers([]);
       } finally {
@@ -2543,6 +2539,7 @@ function DataGapsReport({ bethels }) {
   const countAddress = members.filter((m) => m.exception === "missing_address").length;
   const countEmail = members.filter((m) => m.exception === "no_email").length;
   const countNoLeader = bethelsSansLeader.length;
+  const countZoneNonVerifiee = zonesNonVerifiees.length;
 
   const EXCEPTION_LABELS = {
     missing_contact: { label: "Missing contact", color: "var(--brick)" },
@@ -2559,6 +2556,7 @@ function DataGapsReport({ bethels }) {
           { id: "missing_address", label: `Missing address (${countAddress})` },
           { id: "no_email", label: `No email (${countEmail})` },
           { id: "no_leader", label: `No leader (${countNoLeader})` },
+          { id: "unverified_zone", label: `Unverified zone (${countZoneNonVerifiee})` },
         ].map((f) => (
           <button key={f.id} onClick={() => setFilter(f.id)} style={{
             padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
@@ -2589,6 +2587,32 @@ function DataGapsReport({ bethels }) {
                 </div>
                 <span style={{ fontSize: "11px", padding: "3px 10px", borderRadius: "999px", fontWeight: 600, background: "rgba(162,59,51,0.10)", color: "var(--brick)" }}>
                   No leader
+                </span>
+              </div>
+            ))}
+          </div>
+        )
+      ) : filter === "unverified_zone" ? (
+        zonesNonVerifiees.length === 0 ? (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+            Every Bethel's zone is backed by a real address. 🎉
+          </div>
+        ) : (
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
+            <div style={{ padding: "10px 16px", fontSize: "12px", color: "var(--ink-muted)", borderBottom: "1px solid var(--border)", background: "var(--bg)" }}>
+              These Bethels show a zone, but it's inherited from an old numbering prefix — never confirmed by a real address.
+            </div>
+            {zonesNonVerifiees.map((b, i) => (
+              <div key={b.bethel_id} style={{
+                display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
+                borderBottom: i < zonesNonVerifiees.length - 1 ? "1px solid var(--border)" : "none", background: "var(--surface)",
+              }}>
+                <div>
+                  <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{b.leader_name || "—"} — {b.hp_number}</div>
+                  <div style={{ fontSize: "12px", color: "var(--gold)", marginTop: "2px" }}>Currently labeled: {b.zone_name}</div>
+                </div>
+                <span style={{ fontSize: "11px", padding: "3px 10px", borderRadius: "999px", fontWeight: 600, background: "rgba(184,134,59,0.10)", color: "var(--gold)" }}>
+                  Unverified
                 </span>
               </div>
             ))}
