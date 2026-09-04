@@ -1778,7 +1778,13 @@ function SupervisionGridView() {
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>
-        Campus Pastor: TG Montreal — auto-generated from supervision chain fields. [v2-exact-match]
+        Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
+      </p>
+      <p style={{ color: "var(--brick)", fontSize: "11px", fontFamily: "var(--font-mono)", margin: "0 0 14px", background: "rgba(184,134,59,0.08)", padding: "6px 10px", borderRadius: "6px" }}>
+        DEBUG: {membres.length} membres chargés · {membres.filter((m) => m.role === "Bethel Leader" || m.role === "Ananias").length} avec rôle BL/Ananias ·
+        {" "}{membres.filter((m) => m.overseer_name).length} avec overseer_name rempli ·
+        {" "}Deloris trouvée: {membres.some((m) => m.first_name?.includes("Deloris")) ? "OUI" : "NON"} ·
+        {" "}Casulmane trouvée: {membres.some((m) => m.first_name?.includes("Casulmane")) ? "OUI" : "NON"}
       </p>
 
       {!formOuvert ? (
