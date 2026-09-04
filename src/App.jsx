@@ -1661,16 +1661,36 @@ function SupervisionGridView() {
     const overseers = membres.filter((m) => m.role === "Overseer");
     const bethelLeaders = membres.filter((m) => m.overseer_name && m.role !== "Overseer" && m.role !== "Ministre Ordonné");
 
+    // Correspondance par clé exacte normalisée -- plus simple et plus fiable que la
+    // recherche floue par mots communs pour ce cas précis (on contrôle le texte nous-mêmes).
+    const overseersParMinistre = {}; // clé = normaliseNom(nom du ministre) -> [overseers]
+    overseers.forEach((o) => {
+      const cle = normaliseNom(o.ordained_minister_name || "");
+      if (!cle) return;
+      if (!overseersParMinistre[cle]) overseersParMinistre[cle] = [];
+      overseersParMinistre[cle].push(o);
+    });
+
+    const blParOverseer = {}; // clé = normaliseNom(nom de l'overseer) -> [bethel leaders]
+    bethelLeaders.forEach((bl) => {
+      const cle = normaliseNom(bl.overseer_name || "");
+      if (!cle) return;
+      if (!blParOverseer[cle]) blParOverseer[cle] = [];
+      blParOverseer[cle].push(bl);
+    });
+
     const resultat = [];
 
     ministres.forEach((min) => {
-      const sesOverseers = overseers.filter((o) => trouveDansListe(o.ordained_minister_name, [min]));
+      const cleMin = normaliseNom(`${min.first_name} ${min.last_name}`);
+      const sesOverseers = overseersParMinistre[cleMin] || [];
       // On ignore les Ministres qui n'ont encore AUCUN Overseer relié -- rien d'utile à montrer
       if (sesOverseers.length === 0) return;
 
       let premiereLigneDuBloc = true;
       sesOverseers.forEach((ov) => {
-        const sesBL = bethelLeaders.filter((bl) => trouveDansListe(bl.overseer_name, [ov]));
+        const cleOv = normaliseNom(`${ov.first_name} ${ov.last_name}`);
+        const sesBL = blParOverseer[cleOv] || [];
         if (sesBL.length === 0) {
           resultat.push({ ministre: min, overseer: ov, bl: null, nouveauBloc: premiereLigneDuBloc });
           premiereLigneDuBloc = false;
