@@ -1638,11 +1638,16 @@ function SupervisionGridView() {
     (async () => {
       setLoading(true);
       try {
-        const data = await supaGet(
-          "members",
-          "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000"
-        );
-        setMembres(data);
+        const [membresData, bethelsData, zonesData] = await Promise.all([
+          supaGet("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,postal_code,bethel_id,overseer_name,ordained_minister_name&limit=5000"),
+          supaGet("bethels", "select=bethel_id,zone_id&status=eq.active&limit=5000"),
+          supaGet("data_zones", "select=zone_id,zone_name&is_active=eq.true"),
+        ]);
+        const zoneNomParId = Object.fromEntries(zonesData.map((z) => [z.zone_id, z.zone_name]));
+        const zoneParBethel = Object.fromEntries(bethelsData.map((b) => [b.bethel_id, zoneNomParId[b.zone_id] || ""]));
+        // Attache la vraie zone du Bethel de chaque personne (pas sa ville personnelle,
+        // souvent jamais remplie) -- c'est celle-là qu'on a corrigée toute la journée.
+        setMembres(membresData.map((m) => ({ ...m, zoneReelle: zoneParBethel[m.bethel_id] || m.city || "" })));
       } catch (e) {
         setMembres([]);
       } finally {
@@ -1697,7 +1702,7 @@ function SupervisionGridView() {
         <td style={{ padding: "5px 8px", fontSize: "12px", color: "var(--ink)" }}>{personne.last_name}</td>
         <td style={{ padding: "5px 8px", fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{personne.phone || ""}</td>
         <td style={{ padding: "5px 8px", fontSize: "11px", color: "var(--ink-muted)" }}>{personne.email || ""}</td>
-        <td style={{ padding: "5px 8px", fontSize: "11.5px", color: "var(--ink)" }}>{personne.city || ""}</td>
+        <td style={{ padding: "5px 8px", fontSize: "11.5px", color: "var(--ink)" }}>{personne.zoneReelle || ""}</td>
         <td style={{ padding: "5px 8px", fontSize: "11px", color: "var(--ink-muted)", borderRight: "2px solid var(--ink-muted)" }}>
           {personne.address || ""}{personne.postal_code ? `, ${personne.postal_code}` : ""}
         </td>
