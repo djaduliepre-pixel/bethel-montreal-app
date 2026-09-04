@@ -1778,7 +1778,7 @@ function SupervisionGridView() {
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>
-        Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
+        Campus Pastor: TG Montreal — auto-generated from supervision chain fields. [v2-exact-match]
       </p>
 
       {!formOuvert ? (
