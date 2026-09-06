@@ -1027,6 +1027,7 @@ function MemberProfileModal({ member, onClose, onSaved }) {
     ananias_name: member.ananias_name || "", bethel_leader_name: member.bethel_leader_name || "",
     overseer_name: member.overseer_name || "", ordained_minister_name: member.ordained_minister_name || "",
     willing_to_host: member.willing_to_host || false,
+    willing_to_supervise: member.willing_to_supervise || false,
     status: member.status || "active",
     photo_url: member.photo_url || "",
     previous_church: member.previous_church || "",
@@ -1137,6 +1138,7 @@ function MemberProfileModal({ member, onClose, onSaved }) {
               <Field label="Gender" value={member.gender} />
               <Field label="Address" value={member.address ? `${member.address}${member.postal_code ? ", " + member.postal_code : ""}` : null} />
               <Field label="Willing to host" value={member.willing_to_host ? "Yes" : "No"} />
+              <Field label="Willing to supervise" value={member.willing_to_supervise ? "Yes" : "No"} />
 
               <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", marginTop: "16px", marginBottom: "10px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
                 Membership record
@@ -1227,6 +1229,10 @@ function MemberProfileModal({ member, onClose, onSaved }) {
               <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink)", margin: "6px 0 10px" }}>
                 <input type="checkbox" checked={form.willing_to_host} onChange={(e) => setForm((f) => ({ ...f, willing_to_host: e.target.checked }))} />
                 Willing to host
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink)", margin: "6px 0 10px" }}>
+                <input type="checkbox" checked={form.willing_to_supervise} onChange={(e) => setForm((f) => ({ ...f, willing_to_supervise: e.target.checked }))} />
+                Willing to supervise (Overseer available for outreach)
               </label>
 
               <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--plum)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "6px 0 8px", borderTop: "1px solid var(--border)", paddingTop: "12px" }}>
