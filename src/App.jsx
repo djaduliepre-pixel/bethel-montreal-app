@@ -769,7 +769,7 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
 /* ------------------------------------------------------------------ */
 function NewSubmissionModal({ campusId, onClose, onCreated }) {
   const [form, setForm] = useState({
-    first_name: "", last_name: "", phone: "", address: "",
+    first_name: "", last_name: "", phone: "", address: "", city: "", postal_code: "",
     willing_to_host: "no", leadership_level: "new_member",
   });
   const [saving, setSaving] = useState(false);
@@ -790,7 +790,7 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
         first_name: form.first_name,
         last_name: form.last_name,
         phone: form.phone,
-        address: form.address,
+        address: [form.address, form.city, form.postal_code].filter(Boolean).join(", "),
         campus_id: campusId,
         willing_to_host: form.willing_to_host === "yes",
         leadership_level: form.leadership_level,
@@ -826,6 +826,8 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
         <input placeholder="Last name" style={inputStyle} value={form.last_name} onChange={set("last_name")} />
         <input placeholder="Phone" style={inputStyle} value={form.phone} onChange={set("phone")} />
         <input placeholder="Address" style={inputStyle} value={form.address} onChange={set("address")} />
+        <input placeholder="City" style={inputStyle} value={form.city} onChange={set("city")} />
+        <input placeholder="Postal code" style={inputStyle} value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
         <select style={inputStyle} value={form.willing_to_host} onChange={set("willing_to_host")}>
           <option value="no">Not willing to host</option>
           <option value="yes">Willing to host</option>
