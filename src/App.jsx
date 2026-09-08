@@ -2801,7 +2801,97 @@ function DataGapsReport({ bethels }) {
   );
 }
 
-function ReportsView({ submissions, bethels, zones, onChanged }) {
+// Compare l'adresse PERSONNELLE de chaque membre (pas celle du Bethel) à la zone
+// suggérée par son propre code postal -- utile pour repérer les membres "cachés"
+// dans un Bethel dont le leader pourrait déménager, comme Marie André Luc chez
+// Marie Clotilde Luc : si le leader bouge un jour, ce rapport permet de retrouver
+// tout de suite qui d'autre dans ce Bethel a une adresse personnelle différente.
+function MemberZoneMismatchReport({ zones }) {
+  const [loading, setLoading] = useState(true);
+  const [mismatches, setMismatches] = useState([]);
+
+  async function scanner() {
+    setLoading(true);
+    try {
+      const membres = await supaGetTout(
+        "members",
+        "status=eq.active&select=member_id,first_name,last_name,address,bethel_id&order=first_name.asc"
+      );
+      const bethelsData = await supaGet("bethels", "select=bethel_id,hp_number,leader_name,zone_id&status=eq.active&limit=5000");
+      const zoneById = Object.fromEntries(zones.map((z) => [z.zone_id, z]));
+      const bethelById = Object.fromEntries(bethelsData.map((b) => [b.bethel_id, b]));
+
+      const trouves = [];
+      membres.forEach((m) => {
+        if (!m.address || !m.address.trim()) return; // pas d'adresse perso à comparer
+        const suggestion = suggererZoneDepuisAdresse(m.address);
+        if (!suggestion) return;
+        const bethel = bethelById[m.bethel_id];
+        if (!bethel) return;
+        const zoneActuelle = zoneById[bethel.zone_id];
+        if (!zoneActuelle) return;
+        if (normaliseNom(zoneActuelle.zone_name) !== normaliseNom(suggestion)) {
+          trouves.push({
+            membre: m, bethel, zoneActuelleNom: zoneActuelle.zone_name, zoneSuggereeNom: suggestion,
+          });
+        }
+      });
+      setMismatches(trouves);
+    } catch (e) {
+      setMismatches([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => { scanner(); }, [zones]);
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+        <span style={{ fontSize: "13px", color: "var(--ink-muted)" }}>
+          Compares each member's own address against their Bethel's zone -- catches people "hidden" inside a group whose leader might move.
+        </span>
+        <button onClick={scanner} disabled={loading} style={{
+          display: "flex", alignItems: "center", gap: "5px", padding: "6px 12px", borderRadius: "6px",
+          border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", color: "var(--ink-muted)", cursor: "pointer",
+        }}>
+          <RefreshCw size={12} /> Re-scan
+        </button>
+      </div>
+
+      {loading ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Scanning all active members…</div>
+      ) : mismatches.length === 0 ? (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+          No mismatches found -- every member's own address matches their Bethel's zone. 🎉
+        </div>
+      ) : (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
+          {mismatches.map((m, i) => (
+            <div key={m.membre.member_id} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 16px",
+              borderBottom: i < mismatches.length - 1 ? "1px solid var(--border)" : "none", background: "var(--surface)",
+            }}>
+              <div>
+                <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{m.membre.first_name} {m.membre.last_name}</div>
+                <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "2px" }}>{m.membre.address}</div>
+                <div style={{ fontSize: "12px", marginTop: "4px" }}>
+                  In <strong>{m.bethel.leader_name}</strong>'s Bethel ({m.bethel.hp_number}) —
+                  <span style={{ color: "var(--brick)" }}> {m.zoneActuelleNom}</span>
+                  <span style={{ color: "var(--ink-muted)" }}> but their own address suggests </span>
+                  <span style={{ color: "var(--teal)", fontWeight: 600 }}>{m.zoneSuggereeNom}</span>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
   const [tab, setTab] = useState("hosting");
   const byLeadership = useMemo(() => {
     const counts = {};
@@ -2820,11 +2910,11 @@ function ReportsView({ submissions, bethels, zones, onChanged }) {
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Reports</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : "Bethels whose zone doesn't match their address."}
+        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : tab === "zonemismatch" ? "Bethels whose zone doesn't match their address." : "Members whose own address doesn't match their Bethel's zone."}
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }].map((t) => (
+        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }, { id: "membermismatch", label: "Member Address Mismatches" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -2862,8 +2952,10 @@ function ReportsView({ submissions, bethels, zones, onChanged }) {
         )
       ) : tab === "gaps" ? (
         <DataGapsReport bethels={bethels} />
-      ) : (
+      ) : tab === "zonemismatch" ? (
         <ZoneMismatchReport zones={zones} onChanged={onChanged} />
+      ) : (
+        <MemberZoneMismatchReport zones={zones} />
       )}
     </div>
   );
