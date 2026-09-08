@@ -262,7 +262,7 @@ const ZONE_PAR_FSA = {
   'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny','J5W':'Repentigny Repentigny',
   'J6X':'Terrebonne Terrebonne','J6Y':'Terrebonne Terrebonne','J6V':'Terrebonne Terrebonne','J6W':'Terrebonne Terrebonne','J7M':'Terrebonne Terrebonne',
   'J7K':'Mascouche Mascouche','J7L':'Mascouche Mascouche',
-  'J6E':'Repentigny Repentigny', // L'Assomption/région -- meilleure approximation dispo
+  'J6E':'Saint-Charles-Borromée Saint-Charles-Borromée', // corrigé le 7 sept. 2026 -- zone dédiée créée, plus besoin d'approximer vers Repentigny
   'J6N':'Beauharnois Beauharnois', // Beauharnois -- corrigé le 4 sept. 2026, PAS Laval comme deviné avant
   'J6Z':'Lorraine Lorraine', // Lorraine (Laurentides), pas Terrebonne comme deviné plus tôt
   'J6':'Terrebonne Terrebonne', // repli large pour tout le reste de la famille J6 (Lanaudière)
