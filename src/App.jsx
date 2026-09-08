@@ -257,11 +257,13 @@ const ZONE_PAR_FSA = {
   'H7M':'Laval Vimont','H7R':'Laval Laval-Ouest',
   'H7N':'Laval Pont-Viau','H7G':'Laval Pont-Viau',
   'H7S':'Laval Chomedey','H7T':'Laval Chomedey','H7V':'Laval Chomedey','H7W':'Laval Chomedey',
+  'H7P':'Laval Fabreville', // ajouté le 6 sept. 2026, secteur absent avant
+  'H7C':'Laval Duvernay', // ajouté le 6 sept. 2026, secteur absent avant (Duvernay/Saint-Vincent-de-Paul)
   'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny','J5W':'Repentigny Repentigny',
   'J6X':'Terrebonne Terrebonne','J6Y':'Terrebonne Terrebonne','J6V':'Terrebonne Terrebonne','J6W':'Terrebonne Terrebonne','J7M':'Terrebonne Terrebonne',
   'J7K':'Mascouche Mascouche','J7L':'Mascouche Mascouche',
   'J6E':'Repentigny Repentigny', // L'Assomption/région -- meilleure approximation dispo
-  'J6N':'Laval Auteuil', // Sainte-Thérèse/Blainville, proche Laval
+  'J6N':'Beauharnois Beauharnois', // Beauharnois -- corrigé le 4 sept. 2026, PAS Laval comme deviné avant
   'J6Z':'Lorraine Lorraine', // Lorraine (Laurentides), pas Terrebonne comme deviné plus tôt
   'J6':'Terrebonne Terrebonne', // repli large pour tout le reste de la famille J6 (Lanaudière)
   'G8':'Trois-Rivières Trois-Rivières','G9':'Trois-Rivières Trois-Rivières',
