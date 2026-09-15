@@ -259,7 +259,8 @@ const ZONE_PAR_FSA = {
   'H7S':'Laval Chomedey','H7T':'Laval Chomedey','H7V':'Laval Chomedey','H7W':'Laval Chomedey',
   'H7P':'Laval Fabreville', // ajouté le 6 sept. 2026, secteur absent avant
   'H7C':'Laval Duvernay', // ajouté le 6 sept. 2026, secteur absent avant (Duvernay/Saint-Vincent-de-Paul)
-  'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny','J5W':'Repentigny Repentigny',
+  'J5Y':'Repentigny Repentigny','J6A':'Repentigny Repentigny','J5Z':'Repentigny Repentigny',
+  'J5W':'L\'Épiphanie L\'Épiphanie', // corrigé le 15 sept. 2026 -- zone dédiée existante, plus besoin d'approximer vers Repentigny
   'J6X':'Terrebonne Terrebonne','J6Y':'Terrebonne Terrebonne','J6V':'Terrebonne Terrebonne','J6W':'Terrebonne Terrebonne','J7M':'Terrebonne Terrebonne',
   'J7K':'Mascouche Mascouche','J7L':'Mascouche Mascouche',
   'J6E':'Saint-Charles-Borromée Saint-Charles-Borromée', // corrigé le 7 sept. 2026 -- zone dédiée créée, plus besoin d'approximer vers Repentigny
