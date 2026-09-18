@@ -376,19 +376,25 @@ function traiterNouvellesReponsesHPChurch() {
     var aDitOuiHeberger = (donnees[i][COL_FORM.DISPO_HEBERGER] || '').toString().indexOf('Oui') !== -1;
     var roleActuel = (donnees[i][COL_FORM.ROLE_ACTUEL] || '').toString().trim();
 
-    // Dire "Oui" à héberger ne veut pas dire devenir Bethel Leader : si la
-    // personne s'est elle-même déclarée "Membre" dans le formulaire, elle
-    // reste Membre -- elle peut prêter sa maison pour un Bethel sans qu'on
-    // lui attribue un Bethel ID. Seul un rôle de leadership déjà déclaré
-    // (Ananias, HP Leader, Overseer, Ministre ordonné) ou une réponse sans
-    // rôle précisé laisse la porte ouverte à devenir leader ici.
-    var aDitOui = aDitOuiHeberger && (roleActuel !== 'Membre');
+    // Dire "Oui" à héberger ne veut pas dire devenir Bethel Leader :
+    // -- si la personne s'est déclarée "Membre", elle reste Membre (elle
+    //    peut prêter sa maison sans qu'on lui attribue un Bethel ID) ;
+    // -- si elle supervise déjà d'autres groupes (Overseer, Ministre
+    //    Ordonné, Assistant Pasteur, Pasteur), elle ne peut PAS non plus
+    //    prendre son propre Bethel -- elle ne peut pas être à deux endroits
+    //    en même temps un dimanche à 8h si elle doit aussi superviser
+    //    d'autres Bethels au même moment.
+    // Seuls un Ananias, un Bethel Leader (HP Leader), ou une réponse sans
+    // rôle précisé laissent la porte ouverte à devenir leader ici.
+    var rolesSansBethelPropre = ['Membre', 'Overseer', 'Ministre ordonné', 'Ministre Ordonné', 'Assistant Pasteur', 'Pasteur'];
+    var bloqueDevenirLeader = rolesSansBethelPropre.indexOf(roleActuel) !== -1;
+    var aDitOui = aDitOuiHeberger && !bloqueDevenirLeader;
 
     var resultat = placerPersonneSelonZone({
       ville: ville, prenom: prenom, nom: nom, telephone: telephone,
       email: donnees[i][COL_FORM.EMAIL], adresse: donnees[i][COL_FORM.ADRESSE],
       codePostal: codePostal, aDitOui: aDitOui,
-      offreSaMaisonSansLeadership: aDitOuiHeberger && roleActuel === 'Membre'
+      offreSaMaisonSansLeadership: aDitOuiHeberger && bloqueDevenirLeader
     });
     if (resultat.succes) {
       resume.compteIntegres++;
