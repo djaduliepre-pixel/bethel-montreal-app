@@ -2933,9 +2933,10 @@ function MemberZoneMismatchReport({ zones }) {
     </div>
   );
 }
+function ReportsView({ submissions, bethels, zones, onChanged }) {
 
-
-  const [tab, setTab] = useState("hosting");
+  
+const [tab, setTab] = useState("hosting");
   const byLeadership = useMemo(() => {
     const counts = {};
     submissions.forEach((s) => {
