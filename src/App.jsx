@@ -1355,16 +1355,23 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
     setLoading(true);
     setOpen(true);
     try {
-      const [pendants, membresActifs] = await Promise.all([
+      const [pendants, membresActifs, bethelsTous] = await Promise.all([
         supaGet("submissions", "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"),
-        supaGetTout("members", "status=eq.active&select=first_name,last_name"),
+        supaGetTout("members", "status=eq.active&select=first_name,last_name,bethel_id"),
+        supaGet("bethels", "select=bethel_id,zone_id"),
       ]);
-      // Exclut toute personne qui a une vieille soumission "Non" en attente,
-      // mais qui existe DÉJÀ comme membre actif ailleurs (ex: elle a dit "Non"
-      // il y a longtemps, puis "Oui" plus récemment et a déjà son propre Bethel).
-      const nomsDejaMembres = new Set(membresActifs.map((m) => normaliseNom(`${m.first_name} ${m.last_name}`)));
-      const pendantsFiltres = pendants.filter((p) => !nomsDejaMembres.has(normaliseNom(`${p.first_name} ${p.last_name}`)));
-
+      // Exclut une personne seulement si elle est DÉJÀ membre actif dans un
+      // Bethel de la MÊME zone que celui qui cherche (ex: elle a dit "Non"
+      // il y a longtemps, puis "Oui" plus récemment et a déjà son propre Bethel
+      // dans cette zone). Un membre actif ailleurs, hors de cette zone (ex:
+      // coincé dans un vieux groupe hors-zone), reste visible pour ce leader.
+      const zoneParBethelId = Object.fromEntries(bethelsTous.map((b) => [b.bethel_id, b.zone_id]));
+      const nomsDejaMembresDansZone = new Set(
+        membresActifs
+          .filter((m) => zoneParBethelId[m.bethel_id] === bethel.zone_id)
+          .map((m) => normaliseNom(`${m.first_name} ${m.last_name}`))
+      );
+      const pendantsFiltres = pendants.filter((p) => !nomsDejaMembresDansZone.has(normaliseNom(`${p.first_name} ${p.last_name}`)));
       const avecDistance = await Promise.all(
         pendantsFiltres.filter((p) => p.address).map(async (p) => {
           try {
