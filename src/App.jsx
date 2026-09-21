@@ -1355,30 +1355,48 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
     setLoading(true);
     setOpen(true);
     try {
-      const [pendants, membresActifs, bethelsTous] = await Promise.all([
+      const [pendants, membresActifs, bethelsTous, zonesToutes] = await Promise.all([
         supaGet("submissions", "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"),
-        supaGetTout("members", "status=eq.active&select=first_name,last_name,bethel_id"),
+        supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,phone,address,bethel_id"),
         supaGet("bethels", "select=bethel_id,zone_id"),
+        supaGet("data_zones", "select=zone_id,zone_name"),
       ]);
+      const zoneParBethelId = Object.fromEntries(bethelsTous.map((b) => [b.bethel_id, b.zone_id]));
+      const nomZoneParId = Object.fromEntries(zonesToutes.map((z) => [z.zone_id, z.zone_name]));
+
+      // Groupe 1 : soumissions "Non" en attente.
       // Exclut une personne seulement si elle est DÉJÀ membre actif dans un
       // Bethel de la MÊME zone que celui qui cherche (ex: elle a dit "Non"
       // il y a longtemps, puis "Oui" plus récemment et a déjà son propre Bethel
       // dans cette zone). Un membre actif ailleurs, hors de cette zone (ex:
       // coincé dans un vieux groupe hors-zone), reste visible pour ce leader.
-      const zoneParBethelId = Object.fromEntries(bethelsTous.map((b) => [b.bethel_id, b.zone_id]));
       const nomsDejaMembresDansZone = new Set(
         membresActifs
           .filter((m) => zoneParBethelId[m.bethel_id] === bethel.zone_id)
           .map((m) => normaliseNom(`${m.first_name} ${m.last_name}`))
       );
-      const pendantsFiltres = pendants.filter((p) => !nomsDejaMembresDansZone.has(normaliseNom(`${p.first_name} ${p.last_name}`)));
+      const pendantsFiltres = pendants
+        .filter((p) => !nomsDejaMembresDansZone.has(normaliseNom(`${p.first_name} ${p.last_name}`)))
+        .map((p) => ({ ...p, kind: "pending" }));
+
+      // Groupe 2 : membres déjà actifs, mais coincés dans un Bethel d'une
+      // AUTRE zone que celle-ci — candidats à transférer vers ce Bethel.
+      const membresMalPlaces = membresActifs
+        .filter((m) => m.bethel_id !== bethel.bethel_id && zoneParBethelId[m.bethel_id] !== bethel.zone_id)
+        .map((m) => ({
+          ...m,
+          kind: "member",
+          zoneActuelle: nomZoneParId[zoneParBethelId[m.bethel_id]] || "",
+        }));
+
+      const candidatsAvecAdresse = [...pendantsFiltres, ...membresMalPlaces].filter((c) => c.address);
       const avecDistance = await Promise.all(
-        pendantsFiltres.filter((p) => p.address).map(async (p) => {
+        candidatsAvecAdresse.map(async (c) => {
           try {
-            const minutes = await getDrivingMinutes(p.address, bethel.address);
-            return { ...p, minutes, error: null };
+            const minutes = await getDrivingMinutes(c.address, bethel.address);
+            return { ...c, minutes, error: null };
           } catch (e) {
-            return { ...p, minutes: null, error: e.message };
+            return { ...c, minutes: null, error: e.message };
           }
         })
       );
@@ -1396,19 +1414,26 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
   }
 
   async function assigner(candidat) {
-    setAssigningId(candidat.submission_id);
+    const cleId = candidat.kind === "member" ? candidat.member_id : candidat.submission_id;
+    setAssigningId(cleId);
     try {
-      await supaPost("members", {
-        bethel_id: bethel.bethel_id,
-        first_name: candidat.first_name, last_name: candidat.last_name, phone: candidat.phone,
-        address: candidat.address,
-        role: LEADERSHIP_LABELS[candidat.leadership_level] || "Membre",
-        willing_to_host: false, status: "active",
-      });
-      await supaPatch("submissions", `submission_id=eq.${candidat.submission_id}`, {
-        status: "approved", zone_id: bethel.zone_id, reviewed_at: new Date().toISOString(),
-      });
-      setCandidats((c) => c.filter((x) => x.submission_id !== candidat.submission_id));
+      if (candidat.kind === "member") {
+        // Membre déjà actif ailleurs : on le transfère simplement dans ce Bethel.
+        await supaPatch("members", `member_id=eq.${candidat.member_id}`, { bethel_id: bethel.bethel_id });
+        setCandidats((c) => c.filter((x) => (x.kind === "member" ? x.member_id : x.submission_id) !== cleId));
+      } else {
+        await supaPost("members", {
+          bethel_id: bethel.bethel_id,
+          first_name: candidat.first_name, last_name: candidat.last_name, phone: candidat.phone,
+          address: candidat.address,
+          role: LEADERSHIP_LABELS[candidat.leadership_level] || "Membre",
+          willing_to_host: false, status: "active",
+        });
+        await supaPatch("submissions", `submission_id=eq.${candidat.submission_id}`, {
+          status: "approved", zone_id: bethel.zone_id, reviewed_at: new Date().toISOString(),
+        });
+        setCandidats((c) => c.filter((x) => (x.kind === "member" ? x.member_id : x.submission_id) !== cleId));
+      }
       onAssigned();
     } catch (e) {
       alert("Error: " + e.message);
@@ -1438,13 +1463,13 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
       ) : (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "16px", background: "var(--bg)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Nearby pending members ("No" submissions)</span>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Nearby candidates (pending + misplaced members)</span>
             <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
           </div>
           {loading ? (
             <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Checking travel times for all pending submissions…</div>
           ) : candidats.length === 0 ? (
-            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>No pending "No" submissions with a usable address found.</div>
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>No pending submissions or misplaced members with a usable address found.</div>
           ) : (
             <>
               {(() => {
@@ -1461,14 +1486,24 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
                   </div>
                 );
               })()}
-              {candidats.map((c) => (
-              <div key={c.submission_id} style={{
+              {candidats.map((c) => {
+              const cleId = c.kind === "member" ? c.member_id : c.submission_id;
+              return (
+              <div key={cleId} style={{
                 display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0",
                 borderBottom: "1px solid var(--border)",
               }}>
                 <div>
                   <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{c.first_name} {c.last_name}</div>
                   <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{c.address}</div>
+                  {c.kind === "member" && (
+                    <div style={{
+                      display: "inline-block", marginTop: "3px", fontSize: "10.5px", fontWeight: 600,
+                      padding: "2px 7px", borderRadius: "999px", background: "rgba(31,92,78,0.10)", color: "var(--teal)",
+                    }}>
+                      ✅ Already a member — {c.zoneActuelle || "another zone"}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", flexShrink: 0 }}>
                   {c.minutes != null ? (
@@ -1483,18 +1518,19 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
                     <span style={{ fontSize: "11px", color: "var(--brick)" }} title={c.error}>⚠️ {c.error || "No route"}</span>
                   )}
                   <button
-                    disabled={assigningId === c.submission_id}
+                    disabled={assigningId === cleId}
                     onClick={() => assigner(c)}
                     style={{
                       padding: "5px 12px", borderRadius: "6px", border: "none", background: "var(--plum)",
                       color: "#fff", fontSize: "11.5px", fontWeight: 600, cursor: "pointer",
                     }}
                   >
-                    {assigningId === c.submission_id ? "…" : "Assign"}
+                    {assigningId === cleId ? "…" : c.kind === "member" ? "Move here" : "Assign"}
                   </button>
                 </div>
               </div>
-              ))}
+              );
+              })}
             </>
           )}
         </div>
@@ -1502,7 +1538,6 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
     </div>
   );
 }
-
 function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
   const [members, setMembers] = useState([]);
   const [loading, setLoading] = useState(true);
