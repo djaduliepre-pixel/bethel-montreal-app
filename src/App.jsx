@@ -879,7 +879,8 @@ function suggererProchainHpNumber(zoneId, bethelsTous) {
 
 function ManageMembersView({ bethels, onChanged }) {
   const [form, setForm] = useState({
-    first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false,
+    first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "",
+    address: "", postal_code: "", role: "Membre", willing_to_host: false,
   });
   const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
   const [loadingDistances, setLoadingDistances] = useState(false);
@@ -985,11 +986,12 @@ function ManageMembersView({ bethels, onChanged }) {
       });
       await supaPost("members", {
         first_name: form.first_name, last_name: form.last_name, phone: form.phone,
+        email: form.email || null, gender: form.gender || null, decision: form.decision || null,
         address: form.address, postal_code: form.postal_code, role: form.role,
         willing_to_host: true, bethel_id: nouveauBethel.bethel_id, status: "active",
       });
       setJustAdded({ name: nomComplet, bethel: nouveauBethel, nouveauBethelCree: true });
-      setForm({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
+      setForm({ first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
       setCandidates([]);
       setSelectedBethel(null);
       setZoneProposee(null);
@@ -1013,11 +1015,12 @@ function ManageMembersView({ bethels, onChanged }) {
       }
       await supaPost("members", {
         first_name: form.first_name, last_name: form.last_name, phone: form.phone,
+        email: form.email || null, gender: form.gender || null, decision: form.decision || null,
         address: form.address, postal_code: form.postal_code, role: form.role,
         willing_to_host: form.willing_to_host, bethel_id: selectedBethel.bethel_id, status: "active",
       });
       setJustAdded({ name: `${form.first_name} ${form.last_name}`, bethel: selectedBethel });
-      setForm({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
+      setForm({ first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
       setCandidates([]);
       setSelectedBethel(null);
       onChanged();
@@ -1087,8 +1090,20 @@ function ManageMembersView({ bethels, onChanged }) {
           <input placeholder="Nom" style={inputStyle} value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
         </div>
         <input placeholder="Téléphone" style={inputStyle} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formaterTelephone(e.target.value) }))} />
+        <input placeholder="Courriel" type="email" style={inputStyle} value={form.email} onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))} />
         <input placeholder="Adresse complète" style={inputStyle} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
         <input placeholder="Code postal" style={inputStyle} value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px" }}>
+          <select style={inputStyle} value={form.gender} onChange={(e) => setForm((f) => ({ ...f, gender: e.target.value }))}>
+            <option value="">Sexe…</option>
+            <option value="Homme">Homme</option>
+            <option value="Femme">Femme</option>
+          </select>
+          <select style={inputStyle} value={form.decision} onChange={(e) => setForm((f) => ({ ...f, decision: e.target.value }))}>
+            <option value="">Décision…</option>
+            {["Planté", "Sauvé", "Restauré", "Baptisé"].map((d) => <option key={d} value={d}>{d}</option>)}
+          </select>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px", alignItems: "center" }}>
           <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
             {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
