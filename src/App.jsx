@@ -970,6 +970,7 @@ function ManageMembersView({ bethels, onChanged }) {
   const [searching, setSearching] = useState(false);
   const [searched, setSearched] = useState(false);
   const [busyId, setBusyId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   const inputStyle = {
     width: "100%", boxSizing: "border-box", padding: "9px 10px", marginBottom: "10px",
@@ -1060,7 +1061,13 @@ function ManageMembersView({ bethels, onChanged }) {
         address: form.address, postal_code: form.postal_code, role: form.role,
         willing_to_host: true, bethel_id: nouveauBethel.bethel_id, status: "active",
       });
-      setJustAdded({ name: nomComplet, bethel: nouveauBethel, nouveauBethelCree: true });
+      setJustAdded({
+        name: nomComplet, bethel: nouveauBethel, nouveauBethelCree: true,
+        details: {
+          phone: form.phone, email: form.email, gender: form.gender, decision: form.decision,
+          address: form.address, postal_code: form.postal_code, role: form.role, willing_to_host: true,
+        },
+      });
       setForm({ first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
       setCandidates([]);
       setSelectedBethel(null);
@@ -1090,7 +1097,13 @@ function ManageMembersView({ bethels, onChanged }) {
         address: form.address, postal_code: form.postal_code, role: form.role,
         willing_to_host: form.willing_to_host, bethel_id: selectedBethel.bethel_id, status: "active",
       });
-      setJustAdded({ name: `${form.first_name} ${form.last_name}`, bethel: selectedBethel });
+      setJustAdded({
+        name: `${form.first_name} ${form.last_name}`, bethel: selectedBethel,
+        details: {
+          phone: form.phone, email: form.email, gender: form.gender, decision: form.decision,
+          address: form.address, postal_code: form.postal_code, role: form.role, willing_to_host: form.willing_to_host,
+        },
+      });
       setForm({ first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
       setCandidates([]);
       setSelectedBethel(null);
@@ -1330,6 +1343,33 @@ function ManageMembersView({ bethels, onChanged }) {
               : `${justAdded.name} ajouté(e) à ${justAdded.bethel.hp_number} (${justAdded.bethel.leader_name}).`}
           </div>
         )}
+
+        {justAdded && justAdded.details && (
+          <div style={{
+            marginTop: "10px", padding: "16px", borderRadius: "10px",
+            border: "1px solid var(--border)", background: "#fafafa",
+          }}>
+            <div style={{ fontSize: "11px", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase", color: "var(--ink-muted)", marginBottom: "10px" }}>
+              Fiche — ce qui vient d'être enregistré
+            </div>
+            <div style={{ fontSize: "16px", fontWeight: 700, color: "var(--ink)", marginBottom: "8px" }}>{justAdded.name}</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 14px", fontSize: "12.5px", color: "var(--ink)" }}>
+              <div><span style={{ color: "var(--ink-muted)" }}>Téléphone :</span> {justAdded.details.phone || "—"}</div>
+              <div><span style={{ color: "var(--ink-muted)" }}>Courriel :</span> {justAdded.details.email || "—"}</div>
+              <div><span style={{ color: "var(--ink-muted)" }}>Sexe :</span> {justAdded.details.gender || "—"}</div>
+              <div><span style={{ color: "var(--ink-muted)" }}>Décision :</span> {justAdded.details.decision || "—"}</div>
+              <div style={{ gridColumn: "1 / -1" }}><span style={{ color: "var(--ink-muted)" }}>Adresse :</span> {justAdded.details.address || "—"} {justAdded.details.postal_code ? `(${justAdded.details.postal_code})` : ""}</div>
+              <div><span style={{ color: "var(--ink-muted)" }}>Rôle :</span> {justAdded.details.role}</div>
+              <div><span style={{ color: "var(--ink-muted)" }}>Disposé(e) à héberger :</span> {justAdded.details.willing_to_host ? "Oui" : "Non"}</div>
+              <div style={{ gridColumn: "1 / -1", paddingTop: "4px", borderTop: "1px solid var(--border)", marginTop: "4px" }}>
+                <span style={{ color: "var(--ink-muted)" }}>Bethel :</span>{" "}
+                <strong>{justAdded.bethel.hp_number}</strong>
+                {justAdded.bethel.zone_name ? ` — ${justAdded.bethel.zone_name}` : ""}
+                {!justAdded.nouveauBethelCree ? ` (leader : ${justAdded.bethel.leader_name})` : ""}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <h2 style={{ fontFamily: "var(--font-display)", fontSize: "18px", margin: "0 0 10px" }}>Retirer un membre existant</h2>
@@ -1354,29 +1394,52 @@ function ManageMembersView({ bethels, onChanged }) {
       <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: "620px" }}>
         {results.map((m) => {
           const bethel = bethelById[m.bethel_id];
+          const ouvert = expandedId === m.member_id;
           return (
             <div key={m.member_id} style={{
-              display: "flex", justifyContent: "space-between", alignItems: "center",
               padding: "10px 14px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)",
             }}>
-              <div>
-                <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{m.first_name} {m.last_name}</div>
-                <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>
-                  {m.role}{bethel ? ` · ${bethel.hp_number} (${bethel.zone_name || "zone inconnue"})` : ""}{m.phone ? ` · ${m.phone}` : ""}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+                   onClick={() => setExpandedId(ouvert ? null : m.member_id)}>
+                <div>
+                  <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{m.first_name} {m.last_name}</div>
+                  <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>
+                    {m.role}{bethel ? ` · ${bethel.hp_number} (${bethel.zone_name || "zone inconnue"})` : ""}{m.phone ? ` · ${m.phone}` : ""}
+                  </div>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "11.5px", color: "var(--plum)", fontWeight: 600 }}>{ouvert ? "Masquer" : "Voir la fiche"}</span>
+                  <button
+                    disabled={busyId === m.member_id}
+                    onClick={(e) => { e.stopPropagation(); retirerMembre(m); }}
+                    title="Retirer"
+                    style={{
+                      display: "flex", alignItems: "center", gap: "5px", padding: "6px 11px", borderRadius: "7px",
+                      border: "1px solid var(--brick)", background: "transparent", color: "var(--brick)",
+                      fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                    }}
+                  >
+                    <Trash2 size={12} /> {busyId === m.member_id ? "…" : "Retirer"}
+                  </button>
                 </div>
               </div>
-              <button
-                disabled={busyId === m.member_id}
-                onClick={() => retirerMembre(m)}
-                title="Retirer"
-                style={{
-                  display: "flex", alignItems: "center", gap: "5px", padding: "6px 11px", borderRadius: "7px",
-                  border: "1px solid var(--brick)", background: "transparent", color: "var(--brick)",
-                  fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                }}
-              >
-                <Trash2 size={12} /> {busyId === m.member_id ? "…" : "Retirer"}
-              </button>
+              {ouvert && (
+                <div style={{
+                  marginTop: "10px", paddingTop: "10px", borderTop: "1px solid var(--border)",
+                  display: "grid", gridTemplateColumns: "1fr 1fr", gap: "5px 14px", fontSize: "12.5px", color: "var(--ink)",
+                }}>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Téléphone :</span> {m.phone || "—"}</div>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Courriel :</span> {m.email || "—"}</div>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Sexe :</span> {m.gender || "—"}</div>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Décision :</span> {m.decision || "—"}</div>
+                  <div style={{ gridColumn: "1 / -1" }}><span style={{ color: "var(--ink-muted)" }}>Adresse :</span> {m.address || "—"} {m.postal_code ? `(${m.postal_code})` : ""}</div>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Disposé(e) à héberger :</span> {m.willing_to_host ? "Oui" : "Non"}</div>
+                  <div style={{ gridColumn: "1 / -1" }}>
+                    <span style={{ color: "var(--ink-muted)" }}>Bethel :</span>{" "}
+                    {bethel ? <strong>{bethel.hp_number}{bethel.zone_name ? ` — ${bethel.zone_name}` : ""} (leader : {bethel.leader_name})</strong> : "—"}
+                  </div>
+                </div>
+              )}
             </div>
           );
         })}
