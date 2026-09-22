@@ -850,6 +850,305 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 }
 
 /* ------------------------------------------------------------------ */
+/* Vue : Ajouter / retirer des membres, avec placement automatique    */
+/* par géolocalisation (adresse -> Bethel actif le plus proche).      */
+/* ------------------------------------------------------------------ */
+function ManageMembersView({ bethels, onChanged }) {
+  const [form, setForm] = useState({
+    first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false,
+  });
+  const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
+  const [loadingDistances, setLoadingDistances] = useState(false);
+  const [selectedBethel, setSelectedBethel] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [justAdded, setJustAdded] = useState(null);
+
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+
+  const inputStyle = {
+    width: "100%", boxSizing: "border-box", padding: "9px 10px", marginBottom: "10px",
+    border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", fontFamily: "var(--font-body)",
+  };
+
+  // Étape 1 : dès que le nom + l'adresse sont saisis, on calcule le temps de
+  // trajet réel jusqu'à TOUS les Bethels actifs qui ont une adresse (peu
+  // importe leur étiquette de zone -- même logique que "Assign to a Bethel"),
+  // et on trie du plus proche au plus loin.
+  async function trouverBethel() {
+    if (!form.address) return;
+    setSelectedBethel(null);
+    setJustAdded(null);
+    const candidatsPossibles = bethels.filter((b) => b.address);
+    setCandidates(candidatsPossibles.map((b) => ({ bethel: b, minutes: null, error: null })));
+    setLoadingDistances(true);
+    try {
+      const results = await Promise.all(candidatsPossibles.map(async (b) => {
+        try {
+          const minutes = await getDrivingMinutes(form.address, b.address);
+          return { bethel: b, minutes, error: null };
+        } catch (e) {
+          return { bethel: b, minutes: null, error: e.message };
+        }
+      }));
+      results.sort((a, b) => {
+        if (a.minutes == null) return 1;
+        if (b.minutes == null) return -1;
+        return a.minutes - b.minutes;
+      });
+      const meilleurs = results.slice(0, 20);
+      setCandidates(meilleurs);
+      // Sélectionne automatiquement le plus proche s'il respecte la règle des 15 min.
+      const plusProche = meilleurs.find((c) => c.minutes != null);
+      if (plusProche && plusProche.minutes <= LIMITE_MINUTES_PROXIMITE) {
+        setSelectedBethel(plusProche.bethel);
+      }
+    } finally {
+      setLoadingDistances(false);
+    }
+  }
+
+  async function confirmerAjout() {
+    if (!form.first_name || !form.last_name || !selectedBethel) return;
+    setSaving(true);
+    try {
+      const avertissement = await verifierDoublon(form.first_name, form.last_name);
+      if (avertissement && !window.confirm(`${avertissement}\n\nAjouter quand même ce membre ?`)) {
+        setSaving(false);
+        return;
+      }
+      await supaPost("members", {
+        first_name: form.first_name, last_name: form.last_name, phone: form.phone,
+        address: form.address, postal_code: form.postal_code, role: form.role,
+        willing_to_host: form.willing_to_host, bethel_id: selectedBethel.bethel_id, status: "active",
+      });
+      setJustAdded({ name: `${form.first_name} ${form.last_name}`, bethel: selectedBethel });
+      setForm({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
+      setCandidates([]);
+      setSelectedBethel(null);
+      onChanged();
+      if (results.length > 0) relancerRecherche(); // rafraîchit la liste du bas si elle est déjà affichée
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // Étape 2 (en bas de page) : rechercher / retirer un membre existant.
+  async function relancerRecherche() {
+    const q = query.trim();
+    if (q.length < 2) { setResults([]); setSearched(false); return; }
+    setSearching(true);
+    try {
+      const parNom = await supaGet(
+        "members",
+        `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*,phone.ilike.*${encodeURIComponent(q)}*)&status=eq.active&order=first_name.asc&limit=40`
+      );
+      setResults(parNom);
+    } catch (e) {
+      setResults([]);
+    } finally {
+      setSearching(false);
+      setSearched(true);
+    }
+  }
+
+  useEffect(() => {
+    const timer = setTimeout(relancerRecherche, 350);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [query]);
+
+  async function retirerMembre(m) {
+    if (!window.confirm(`Retirer ${m.first_name} ${m.last_name} de l'église ?`)) return;
+    setBusyId(m.member_id);
+    try {
+      await supaDelete("members", `member_id=eq.${m.member_id}`);
+      setResults((r) => r.filter((x) => x.member_id !== m.member_id));
+      onChanged();
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const bethelById = useMemo(() => Object.fromEntries(bethels.map((b) => [b.bethel_id, b])), [bethels]);
+
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Ajouter / retirer des membres</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px", maxWidth: "560px" }}>
+        Ajoute une nouvelle personne avec son adresse : le système calcule le temps de trajet réel
+        vers chaque Bethel actif et propose automatiquement le plus proche (règle des {LIMITE_MINUTES_PROXIMITE} min).
+      </p>
+
+      <div style={{
+        border: "1px solid var(--border)", borderRadius: "14px", padding: "22px",
+        background: "var(--surface)", maxWidth: "560px", marginBottom: "36px",
+      }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px" }}>
+          <input placeholder="Prénom" style={inputStyle} value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
+          <input placeholder="Nom" style={inputStyle} value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
+        </div>
+        <input placeholder="Téléphone" style={inputStyle} value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formaterTelephone(e.target.value) }))} />
+        <input placeholder="Adresse complète" style={inputStyle} value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
+        <input placeholder="Code postal" style={inputStyle} value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px", alignItems: "center" }}>
+          <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
+            {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink-muted)", marginBottom: "10px" }}>
+            <input type="checkbox" checked={form.willing_to_host} onChange={(e) => setForm((f) => ({ ...f, willing_to_host: e.target.checked }))} />
+            Disposé(e) à héberger
+          </label>
+        </div>
+
+        <button
+          onClick={trouverBethel}
+          disabled={!form.first_name || !form.last_name || !form.address || loadingDistances}
+          style={{
+            width: "100%", padding: "9px", borderRadius: "8px", border: "1px solid var(--plum)",
+            background: "transparent", color: "var(--plum)", fontSize: "13px", fontWeight: 600,
+            cursor: form.address ? "pointer" : "not-allowed", display: "flex", alignItems: "center",
+            justifyContent: "center", gap: "6px", marginBottom: candidates.length ? "14px" : 0,
+          }}
+        >
+          <Search size={14} /> {loadingDistances ? "Recherche du Bethel le plus proche…" : "Trouver le Bethel le plus proche"}
+        </button>
+
+        {candidates.length > 0 && !loadingDistances && (() => {
+          const meilleurTemps = candidates.reduce((min, c) => (c.minutes != null && c.minutes < min ? c.minutes : min), Infinity);
+          if (meilleurTemps === Infinity || meilleurTemps <= LIMITE_MINUTES_PROXIMITE) return null;
+          return (
+            <div style={{
+              marginBottom: "10px", padding: "10px 12px", borderRadius: "8px",
+              background: "rgba(184,134,59,0.10)", border: "1px solid rgba(184,134,59,0.3)",
+              fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.5,
+            }}>
+              ⚠️ Aucun Bethel à moins de {LIMITE_MINUTES_PROXIMITE} min (le plus proche est à {meilleurTemps} min).
+              Cette personne pourrait plutôt être candidate pour héberger un nouveau Bethel dans sa zone.
+            </div>
+          );
+        })()}
+
+        {candidates.length > 0 && (
+          <div style={{ maxHeight: "260px", overflowY: "auto" }}>
+            {candidates.map((c) => (
+              <button
+                key={c.bethel.bethel_id}
+                onClick={() => setSelectedBethel(c.bethel)}
+                style={{
+                  display: "flex", width: "100%", justifyContent: "space-between", alignItems: "center",
+                  padding: "9px 11px", marginBottom: "6px", borderRadius: "8px", textAlign: "left", cursor: "pointer",
+                  border: selectedBethel?.bethel_id === c.bethel.bethel_id ? "2px solid var(--plum)" : "1px solid var(--border)",
+                  background: "var(--surface)", fontFamily: "var(--font-body)",
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{c.bethel.leader_name}</div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>
+                    {c.bethel.hp_number} · {c.bethel.zone_name || "zone inconnue"}
+                  </div>
+                </div>
+                {c.minutes != null ? (
+                  <span style={{
+                    fontSize: "11.5px", fontWeight: 600, padding: "3px 9px", borderRadius: "999px",
+                    background: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "rgba(31,92,78,0.10)" : "rgba(184,134,59,0.12)",
+                    color: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "var(--teal)" : "var(--gold)",
+                  }}>
+                    🚗 {c.minutes} min
+                  </span>
+                ) : c.error ? (
+                  <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>{c.error}</span>
+                ) : null}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {selectedBethel && (
+          <button
+            disabled={saving}
+            onClick={confirmerAjout}
+            style={{
+              marginTop: "6px", width: "100%", padding: "10px", borderRadius: "8px", border: "none",
+              background: "var(--plum)", color: "#fff", fontSize: "13.5px", fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            {saving ? "Ajout en cours…" : `Ajouter dans ${selectedBethel.hp_number} (${selectedBethel.leader_name})`}
+          </button>
+        )}
+
+        {justAdded && (
+          <div style={{
+            marginTop: "12px", padding: "10px 12px", borderRadius: "8px",
+            background: "rgba(31,92,78,0.10)", color: "var(--teal)", fontSize: "12.5px", fontWeight: 600,
+          }}>
+            <Check size={13} style={{ verticalAlign: "-2px", marginRight: "4px" }} />
+            {justAdded.name} ajouté(e) à {justAdded.bethel.hp_number} ({justAdded.bethel.leader_name}).
+          </div>
+        )}
+      </div>
+
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "18px", margin: "0 0 10px" }}>Retirer un membre existant</h2>
+      <div style={{ position: "relative", marginBottom: "16px", maxWidth: "420px" }}>
+        <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Chercher par nom ou téléphone…"
+          style={{
+            width: "100%", boxSizing: "border-box", padding: "9px 10px 9px 32px",
+            border: "1px solid var(--border)", borderRadius: "8px", fontSize: "14px", outline: "none",
+          }}
+        />
+      </div>
+
+      {searching && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Recherche…</div>}
+      {!searching && searched && results.length === 0 && (
+        <div style={{ fontSize: "13.5px", color: "var(--ink-muted)" }}>Aucun membre trouvé pour "{query}".</div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: "620px" }}>
+        {results.map((m) => {
+          const bethel = bethelById[m.bethel_id];
+          return (
+            <div key={m.member_id} style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "10px 14px", borderRadius: "10px", border: "1px solid var(--border)", background: "var(--surface)",
+            }}>
+              <div>
+                <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{m.first_name} {m.last_name}</div>
+                <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>
+                  {m.role}{bethel ? ` · ${bethel.hp_number} (${bethel.zone_name || "zone inconnue"})` : ""}{m.phone ? ` · ${m.phone}` : ""}
+                </div>
+              </div>
+              <button
+                disabled={busyId === m.member_id}
+                onClick={() => retirerMembre(m)}
+                title="Retirer"
+                style={{
+                  display: "flex", alignItems: "center", gap: "5px", padding: "6px 11px", borderRadius: "7px",
+                  border: "1px solid var(--brick)", background: "transparent", color: "var(--brick)",
+                  fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                }}
+              >
+                <Trash2 size={12} /> {busyId === m.member_id ? "…" : "Retirer"}
+              </button>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Fenêtre : détail d'un Bethel, avec ses membres                     */
 /* ------------------------------------------------------------------ */
 function MemberRow({ m, bethels, currentBethelId, onChanged, isLast, onOpenProfile }) {
@@ -3221,6 +3520,7 @@ const NAV = [
   { id: "dashboard", label: "Dashboard", icon: Home },
   { id: "submissions", label: "Submissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
+  { id: "manage-members", label: "Add / Remove Members", icon: Plus },
   { id: "search", label: "Search Members", icon: Search },
   { id: "devotions", label: "Devotions", icon: BookOpen },
   { id: "orgchart", label: "Org Chart", icon: Network },
@@ -4359,6 +4659,7 @@ function BethelAdminPortalInner() {
               />
             )}
             {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} />}
+            {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
             {view === "orgchart" && <OrgChartView />}
