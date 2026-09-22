@@ -853,6 +853,30 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 /* Vue : Ajouter / retirer des membres, avec placement automatique    */
 /* par géolocalisation (adresse -> Bethel actif le plus proche).      */
 /* ------------------------------------------------------------------ */
+// Rôles capables de diriger leur propre Bethel (jamais un simple Membre --
+// règle métier : "le membre est un bébé, il ne peut pas avoir de numéro de Bethel").
+const ROLES_PEUVENT_DIRIGER = ["Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné"];
+
+// Devine le prochain hp_number disponible pour une zone, en imitant le format déjà
+// utilisé par les Bethels existants de CETTE zone (ex: "BETHEL-RPT-" + prochain numéro).
+// S'il n'y a aucun Bethel existant dans la zone, retombe sur un préfixe générique.
+function suggererProchainHpNumber(zoneId, bethelsTous) {
+  const dansZone = bethelsTous.filter((b) => b.zone_id === zoneId && b.hp_number);
+  const regex = /^(.*?-)(\d+)(-[A-Za-z]+)?$/;
+  let maxNum = 0;
+  const comptagePrefixes = {};
+  dansZone.forEach((b) => {
+    const m = b.hp_number.match(regex);
+    if (!m) return;
+    comptagePrefixes[m[1]] = (comptagePrefixes[m[1]] || 0) + 1;
+    const num = parseInt(m[2], 10);
+    if (num > maxNum) maxNum = num;
+  });
+  const entries = Object.entries(comptagePrefixes).sort((a, b) => b[1] - a[1]);
+  const prefixe = entries[0]?.[0] || "BETHEL-NEW-";
+  return `${prefixe}${maxNum + 1}`;
+}
+
 function ManageMembersView({ bethels, onChanged }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false,
@@ -862,6 +886,14 @@ function ManageMembersView({ bethels, onChanged }) {
   const [selectedBethel, setSelectedBethel] = useState(null);
   const [saving, setSaving] = useState(false);
   const [justAdded, setJustAdded] = useState(null);
+
+  // Proposition de nouveau Bethel (uniquement pertinente si le rôle peut diriger
+  // ET a dit "oui" à héberger -- sinon on cherche simplement un Bethel existant).
+  const [zoneProposee, setZoneProposee] = useState(null); // { zone_id, zone_name } déduite du Bethel actif le plus proche
+  const [hpNumberPropose, setHpNumberPropose] = useState("");
+  const [creantNouveauBethel, setCreantNouveauBethel] = useState(false);
+
+  const peutDirigerEtDitOui = ROLES_PEUVENT_DIRIGER.includes(form.role) && form.willing_to_host;
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -882,6 +914,8 @@ function ManageMembersView({ bethels, onChanged }) {
     if (!form.address) return;
     setSelectedBethel(null);
     setJustAdded(null);
+    setZoneProposee(null);
+    setHpNumberPropose("");
     const candidatsPossibles = bethels.filter((b) => b.address);
     setCandidates(candidatsPossibles.map((b) => ({ bethel: b, minutes: null, error: null })));
     setLoadingDistances(true);
@@ -901,13 +935,70 @@ function ManageMembersView({ bethels, onChanged }) {
       });
       const meilleurs = results.slice(0, 20);
       setCandidates(meilleurs);
-      // Sélectionne automatiquement le plus proche s'il respecte la règle des 15 min.
-      const plusProche = meilleurs.find((c) => c.minutes != null);
-      if (plusProche && plusProche.minutes <= LIMITE_MINUTES_PROXIMITE) {
-        setSelectedBethel(plusProche.bethel);
+
+      // La zone la plus plausible pour cette adresse = celle du Bethel actif le
+      // plus proche (même méthode de vérification utilisée manuellement toute
+      // cette session : le Bethel voisin le plus proche indique la vraie zone).
+      const plusProcheAvecZone = meilleurs.find((c) => c.minutes != null && c.bethel.zone_id);
+      if (plusProcheAvecZone) {
+        setZoneProposee({ zone_id: plusProcheAvecZone.bethel.zone_id, zone_name: plusProcheAvecZone.bethel.zone_name });
+        setHpNumberPropose(suggererProchainHpNumber(plusProcheAvecZone.bethel.zone_id, bethels));
+      }
+
+      // Sélectionne automatiquement le plus proche s'il respecte la règle des 15 min
+      // -- mais seulement pour un Membre simple, ou un leader qui n'a PAS dit "oui"
+      // à héberger (donc pas candidat à diriger son propre nouveau Bethel).
+      if (!peutDirigerEtDitOui) {
+        const plusProche = meilleurs.find((c) => c.minutes != null);
+        if (plusProche && plusProche.minutes <= LIMITE_MINUTES_PROXIMITE) {
+          setSelectedBethel(plusProche.bethel);
+        }
       }
     } finally {
       setLoadingDistances(false);
+    }
+  }
+
+  // Pour un leader (Ananias/Bethel Leader/Overseer/Ministre) qui a dit "oui" à
+  // héberger : au lieu de le rattacher à un Bethel existant, on lui crée SON
+  // PROPRE Bethel, dans sa vraie zone, avec une rupture complète de tout ancien
+  // groupe -- le modèle "membre hôte + Ananias envoyé" / "virage à 360°" déjà
+  // utilisé manuellement cette session.
+  async function creerNouveauBethelEtAjouter() {
+    if (!form.first_name || !form.last_name || !zoneProposee || !hpNumberPropose.trim()) return;
+    setCreantNouveauBethel(true);
+    try {
+      const avertissement = await verifierDoublon(form.first_name, form.last_name);
+      if (avertissement && !window.confirm(`${avertissement}\n\nCréer quand même un nouveau Bethel pour cette personne ?`)) {
+        setCreantNouveauBethel(false);
+        return;
+      }
+      const nomComplet = `${form.first_name} ${form.last_name}`;
+      const [nouveauBethel] = await supaPost("bethels", {
+        hp_number: hpNumberPropose.trim(),
+        zone_id: zoneProposee.zone_id,
+        leader_name: nomComplet,
+        leader_role: form.role,
+        host_name: nomComplet,
+        address: form.address,
+        status: "active",
+      });
+      await supaPost("members", {
+        first_name: form.first_name, last_name: form.last_name, phone: form.phone,
+        address: form.address, postal_code: form.postal_code, role: form.role,
+        willing_to_host: true, bethel_id: nouveauBethel.bethel_id, status: "active",
+      });
+      setJustAdded({ name: nomComplet, bethel: nouveauBethel, nouveauBethelCree: true });
+      setForm({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
+      setCandidates([]);
+      setSelectedBethel(null);
+      setZoneProposee(null);
+      setHpNumberPropose("");
+      onChanged();
+    } catch (e) {
+      alert("Erreur : " + e.message);
+    } finally {
+      setCreantNouveauBethel(false);
     }
   }
 
@@ -1021,6 +1112,40 @@ function ManageMembersView({ bethels, onChanged }) {
           <Search size={14} /> {loadingDistances ? "Recherche du Bethel le plus proche…" : "Trouver le Bethel le plus proche"}
         </button>
 
+        {peutDirigerEtDitOui && zoneProposee && !loadingDistances && (
+          <div style={{
+            marginBottom: "14px", padding: "14px", borderRadius: "10px",
+            background: "rgba(31,92,78,0.06)", border: "1.5px solid var(--teal)",
+          }}>
+            <div style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--teal)", marginBottom: "6px", display: "flex", alignItems: "center", gap: "6px" }}>
+              <Sparkles size={13} /> {form.role} disposé(e) à héberger — créer son propre Bethel
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "10px", lineHeight: 1.5 }}>
+              Zone détectée : <strong style={{ color: "var(--ink)" }}>{zoneProposee.zone_name}</strong>.
+              Un nouveau Bethel indépendant sera créé (aucun lien avec un ancien groupe), avec {form.first_name || "cette personne"} comme leader.
+            </div>
+            <label style={{ fontSize: "11px", color: "var(--ink-muted)", display: "block", marginBottom: "3px" }}>Numéro de Bethel (modifiable)</label>
+            <input
+              style={{ ...inputStyle, marginBottom: "10px", fontFamily: "var(--font-mono)" }}
+              value={hpNumberPropose}
+              onChange={(e) => setHpNumberPropose(e.target.value)}
+            />
+            <button
+              disabled={creantNouveauBethel || !hpNumberPropose.trim()}
+              onClick={creerNouveauBethelEtAjouter}
+              style={{
+                width: "100%", padding: "9px", borderRadius: "8px", border: "none",
+                background: "var(--teal)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+              }}
+            >
+              {creantNouveauBethel ? "Création…" : `Créer ${hpNumberPropose || "le Bethel"} et ajouter ${form.first_name || "la personne"}`}
+            </button>
+            <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "8px" }}>
+              Ou choisis plutôt un Bethel existant ci-dessous si cette personne doit rejoindre un groupe déjà en place.
+            </div>
+          </div>
+        )}
+
         {candidates.length > 0 && !loadingDistances && (() => {
           const meilleurTemps = candidates.reduce((min, c) => (c.minutes != null && c.minutes < min ? c.minutes : min), Infinity);
           if (meilleurTemps === Infinity || meilleurTemps <= LIMITE_MINUTES_PROXIMITE) return null;
@@ -1031,7 +1156,7 @@ function ManageMembersView({ bethels, onChanged }) {
               fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.5,
             }}>
               ⚠️ Aucun Bethel à moins de {LIMITE_MINUTES_PROXIMITE} min (le plus proche est à {meilleurTemps} min).
-              Cette personne pourrait plutôt être candidate pour héberger un nouveau Bethel dans sa zone.
+              {peutDirigerEtDitOui ? " C'est un bon signe pour créer un nouveau Bethel ci-dessus plutôt que de rejoindre un groupe éloigné." : " Cette personne pourrait plutôt être candidate pour héberger un nouveau Bethel dans sa zone."}
             </div>
           );
         })()}
@@ -1090,7 +1215,9 @@ function ManageMembersView({ bethels, onChanged }) {
             background: "rgba(31,92,78,0.10)", color: "var(--teal)", fontSize: "12.5px", fontWeight: 600,
           }}>
             <Check size={13} style={{ verticalAlign: "-2px", marginRight: "4px" }} />
-            {justAdded.name} ajouté(e) à {justAdded.bethel.hp_number} ({justAdded.bethel.leader_name}).
+            {justAdded.nouveauBethelCree
+              ? `${justAdded.name} dirige maintenant son propre Bethel : ${justAdded.bethel.hp_number}.`
+              : `${justAdded.name} ajouté(e) à ${justAdded.bethel.hp_number} (${justAdded.bethel.leader_name}).`}
           </div>
         )}
       </div>
