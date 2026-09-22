@@ -101,6 +101,39 @@ async function verifierDoublon(firstName, lastName) {
   return null;
 }
 
+// Vérifie si un numéro de téléphone est déjà utilisé par une soumission ou un
+// membre actif -- deux personnes différentes ont rarement le même numéro,
+// donc un match ici est un signal fort de doublon (même si le nom diffère,
+// p.ex. faute de frappe ou surnom).
+async function verifierDoublonTelephone(phone) {
+  const chiffres = (phone || "").replace(/\D/g, "");
+  if (chiffres.length < 10) return null;
+  const formate = `(${chiffres.slice(0, 3)}) ${chiffres.slice(3, 6)}-${chiffres.slice(6, 10)}`;
+  const p = encodeURIComponent(formate);
+  try {
+    const [subs, mems] = await Promise.all([
+      supaGet("submissions", `phone=eq.${p}&select=first_name,last_name,hp_number,status`),
+      supaGet("members", `phone=eq.${p}&status=eq.active&select=member_id,first_name,last_name,role`),
+    ]);
+    if (mems.length > 0) return `Ce numéro est déjà utilisé par ${mems[0].first_name} ${mems[0].last_name} (membre actif, rôle : ${mems[0].role}).`;
+    if (subs.length > 0) return `Ce numéro est déjà utilisé par une soumission existante : ${subs[0].first_name} ${subs[0].last_name} (${subs[0].hp_number}).`;
+  } catch (e) {
+    return null;
+  }
+  return null;
+}
+
+// Combine les deux vérifications (nom + téléphone) pour le panneau
+// "Ajouter / retirer des membres". Retourne un tableau de messages (vide si
+// aucun doublon probable détecté).
+async function verifierDoublonsComplet(firstName, lastName, phone) {
+  const [parNom, parTelephone] = await Promise.all([
+    verifierDoublon(firstName, lastName),
+    verifierDoublonTelephone(phone),
+  ]);
+  return [parNom, parTelephone].filter(Boolean);
+}
+
 const LEADERSHIP_LABELS = {
   new_member: "New member", ananias: "Ananias", hp_leader: "HP Leader",
   overseer: "Overseer", ordained_minister: "Ordained Minister",
@@ -888,6 +921,14 @@ function ManageMembersView({ bethels, onChanged }) {
   const [saving, setSaving] = useState(false);
   const [justAdded, setJustAdded] = useState(null);
 
+  // Détection de doublon "en amont" : dès que le nom complet ou le téléphone
+  // est saisi, on vérifie en base avant même de chercher un Bethel. Tant
+  // qu'une alerte est active, la recherche de Bethel et l'ajout sont bloqués
+  // -- sauf si le/la staff coche explicitement "ce n'est pas un doublon".
+  const [doublonAlertes, setDoublonAlertes] = useState([]); // string[]
+  const [verifiantDoublon, setVerifiantDoublon] = useState(false);
+  const [ignorerDoublon, setIgnorerDoublon] = useState(false);
+
   // Proposition de nouveau Bethel (uniquement pertinente si le rôle peut diriger
   // ET a dit "oui" à héberger -- sinon on cherche simplement un Bethel existant).
   const [zoneProposee, setZoneProposee] = useState(null); // { zone_id, zone_name } déduite du Bethel actif le plus proche
@@ -895,6 +936,34 @@ function ManageMembersView({ bethels, onChanged }) {
   const [creantNouveauBethel, setCreantNouveauBethel] = useState(false);
 
   const peutDirigerEtDitOui = ROLES_PEUVENT_DIRIGER.includes(form.role) && form.willing_to_host;
+
+  // Dès que le prénom+nom OU le téléphone changent, on revérifie en base
+  // après un court délai (debounce) -- avant même que le staff clique sur
+  // "Trouver le Bethel". Toute nouvelle modification du formulaire annule
+  // l'autorisation "continuer quand même" précédente, pour éviter qu'elle
+  // reste valide pour une personne différente.
+  useEffect(() => {
+    setIgnorerDoublon(false);
+    const nomPret = form.first_name.trim().length >= 2 && form.last_name.trim().length >= 2;
+    const telPret = form.phone.replace(/\D/g, "").length >= 10;
+    if (!nomPret && !telPret) {
+      setDoublonAlertes([]);
+      return;
+    }
+    let annule = false;
+    setVerifiantDoublon(true);
+    const timer = setTimeout(async () => {
+      const messages = await verifierDoublonsComplet(form.first_name, form.last_name, form.phone);
+      if (!annule) {
+        setDoublonAlertes(messages);
+        setVerifiantDoublon(false);
+      }
+    }, 500);
+    return () => { annule = true; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.first_name, form.last_name, form.phone]);
+
+  const doublonBloquant = doublonAlertes.length > 0 && !ignorerDoublon;
 
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -967,10 +1036,11 @@ function ManageMembersView({ bethels, onChanged }) {
   // utilisé manuellement cette session.
   async function creerNouveauBethelEtAjouter() {
     if (!form.first_name || !form.last_name || !zoneProposee || !hpNumberPropose.trim()) return;
+    if (doublonBloquant) { alert("Un doublon probable a été détecté. Coche \"Ce n'est pas un doublon\" avant de continuer."); return; }
     setCreantNouveauBethel(true);
     try {
-      const avertissement = await verifierDoublon(form.first_name, form.last_name);
-      if (avertissement && !window.confirm(`${avertissement}\n\nCréer quand même un nouveau Bethel pour cette personne ?`)) {
+      const messages = await verifierDoublonsComplet(form.first_name, form.last_name, form.phone);
+      if (messages.length > 0 && !window.confirm(`${messages.join("\n")}\n\nCréer quand même un nouveau Bethel pour cette personne ?`)) {
         setCreantNouveauBethel(false);
         return;
       }
@@ -1006,10 +1076,11 @@ function ManageMembersView({ bethels, onChanged }) {
 
   async function confirmerAjout() {
     if (!form.first_name || !form.last_name || !selectedBethel) return;
+    if (doublonBloquant) { alert("Un doublon probable a été détecté. Coche \"Ce n'est pas un doublon\" avant de continuer."); return; }
     setSaving(true);
     try {
-      const avertissement = await verifierDoublon(form.first_name, form.last_name);
-      if (avertissement && !window.confirm(`${avertissement}\n\nAjouter quand même ce membre ?`)) {
+      const messages = await verifierDoublonsComplet(form.first_name, form.last_name, form.phone);
+      if (messages.length > 0 && !window.confirm(`${messages.join("\n")}\n\nAjouter quand même ce membre ?`)) {
         setSaving(false);
         return;
       }
@@ -1114,9 +1185,33 @@ function ManageMembersView({ bethels, onChanged }) {
           </label>
         </div>
 
+        {verifiantDoublon && (
+          <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "10px" }}>
+            Vérification des doublons…
+          </div>
+        )}
+
+        {doublonAlertes.length > 0 && (
+          <div style={{
+            marginBottom: "14px", padding: "12px 14px", borderRadius: "10px",
+            background: "rgba(178,34,52,0.07)", border: "1.5px solid #b22234",
+          }}>
+            <div style={{ fontSize: "12.5px", fontWeight: 600, color: "#b22234", marginBottom: "6px" }}>
+              ⚠ Doublon probable détecté
+            </div>
+            {doublonAlertes.map((msg, i) => (
+              <div key={i} style={{ fontSize: "12px", color: "var(--ink)", marginBottom: "4px", lineHeight: 1.4 }}>{msg}</div>
+            ))}
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12px", color: "var(--ink)", marginTop: "8px", fontWeight: 600 }}>
+              <input type="checkbox" checked={ignorerDoublon} onChange={(e) => setIgnorerDoublon(e.target.checked)} />
+              Ce n'est pas un doublon, continuer quand même
+            </label>
+          </div>
+        )}
+
         <button
           onClick={trouverBethel}
-          disabled={!form.first_name || !form.last_name || !form.address || loadingDistances}
+          disabled={!form.first_name || !form.last_name || !form.address || loadingDistances || doublonBloquant}
           style={{
             width: "100%", padding: "9px", borderRadius: "8px", border: "1px solid var(--plum)",
             background: "transparent", color: "var(--plum)", fontSize: "13px", fontWeight: 600,
@@ -1146,7 +1241,7 @@ function ManageMembersView({ bethels, onChanged }) {
               onChange={(e) => setHpNumberPropose(e.target.value)}
             />
             <button
-              disabled={creantNouveauBethel || !hpNumberPropose.trim()}
+              disabled={creantNouveauBethel || !hpNumberPropose.trim() || doublonBloquant}
               onClick={creerNouveauBethelEtAjouter}
               style={{
                 width: "100%", padding: "9px", borderRadius: "8px", border: "none",
@@ -1213,7 +1308,7 @@ function ManageMembersView({ bethels, onChanged }) {
 
         {selectedBethel && (
           <button
-            disabled={saving}
+            disabled={saving || doublonBloquant}
             onClick={confirmerAjout}
             style={{
               marginTop: "6px", width: "100%", padding: "10px", borderRadius: "8px", border: "none",
