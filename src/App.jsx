@@ -890,24 +890,26 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 // règle métier : "le membre est un bébé, il ne peut pas avoir de numéro de Bethel").
 const ROLES_PEUVENT_DIRIGER = ["Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné"];
 
-// Devine le prochain hp_number disponible pour une zone, en imitant le format déjà
-// utilisé par les Bethels existants de CETTE zone (ex: "BETHEL-RPT-" + prochain numéro).
-// S'il n'y a aucun Bethel existant dans la zone, retombe sur un préfixe générique.
-function suggererProchainHpNumber(zoneId, bethelsTous) {
-  const dansZone = bethelsTous.filter((b) => b.zone_id === zoneId && b.hp_number);
-  const regex = /^(.*?-)(\d+)(-[A-Za-z]+)?$/;
+// Devine le prochain hp_number disponible pour un nouveau Bethel, avec le nom de
+// ville écrit au complet (plus de code abrégé genre "RPT" ou de suffixe "-F") :
+// "Bethel-Repentigny-000010". Le numéro est séquentiel PAR VILLE, sur 6 chiffres,
+// pour que deux Bethels de la même ville se différencient clairement l'un de l'autre.
+function suggererProchainHpNumber(cityName, bethelsTous) {
+  const ville = (cityName || "").trim();
+  if (!ville) return "";
+  const villeEchappee = ville.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const regex = new RegExp(`^Bethel-${villeEchappee}-(\\d+)$`, "i");
   let maxNum = 0;
-  const comptagePrefixes = {};
-  dansZone.forEach((b) => {
+  bethelsTous.forEach((b) => {
+    if (!b.hp_number) return;
     const m = b.hp_number.match(regex);
-    if (!m) return;
-    comptagePrefixes[m[1]] = (comptagePrefixes[m[1]] || 0) + 1;
-    const num = parseInt(m[2], 10);
-    if (num > maxNum) maxNum = num;
+    if (m) {
+      const num = parseInt(m[1], 10);
+      if (num > maxNum) maxNum = num;
+    }
   });
-  const entries = Object.entries(comptagePrefixes).sort((a, b) => b[1] - a[1]);
-  const prefixe = entries[0]?.[0] || "BETHEL-NEW-";
-  return `${prefixe}${maxNum + 1}`;
+  const prochain = String(maxNum + 1).padStart(6, "0");
+  return `Bethel-${ville}-${prochain}`;
 }
 
 function ManageMembersView({ bethels, onChanged }) {
@@ -1012,8 +1014,13 @@ function ManageMembersView({ bethels, onChanged }) {
       // cette session : le Bethel voisin le plus proche indique la vraie zone).
       const plusProcheAvecZone = meilleurs.find((c) => c.minutes != null && c.bethel.zone_id);
       if (plusProcheAvecZone) {
-        setZoneProposee({ zone_id: plusProcheAvecZone.bethel.zone_id, zone_name: plusProcheAvecZone.bethel.zone_name });
-        setHpNumberPropose(suggererProchainHpNumber(plusProcheAvecZone.bethel.zone_id, bethels));
+        const ville = plusProcheAvecZone.bethel.city_name || plusProcheAvecZone.bethel.zone_name;
+        setZoneProposee({
+          zone_id: plusProcheAvecZone.bethel.zone_id,
+          zone_name: plusProcheAvecZone.bethel.zone_name,
+          city_name: ville,
+        });
+        setHpNumberPropose(suggererProchainHpNumber(ville, bethels));
       }
 
       // Sélectionne automatiquement le plus proche s'il respecte la règle des 15 min
