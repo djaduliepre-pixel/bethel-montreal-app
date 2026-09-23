@@ -164,8 +164,19 @@ function loadGoogleMaps() {
 // Retire le texte "[Secteur: ...]" (ajouté par le formulaire pour garder une info
 // utile à l'affichage) avant d'envoyer l'adresse à Google Maps -- ce texte entre
 // crochets brise parfois la reconnaissance de l'adresse et fait échouer le calcul.
+//
+// Ajoute aussi ", Québec, Canada" quand l'adresse ne mentionne déjà aucun pays --
+// beaucoup d'adresses en base sont courtes (ex: "6270 rue Pierre #12", sans ville
+// ni province). Sans indice de pays, Google Maps peut géocoder ce genre d'adresse
+// n'importe où dans le monde et renvoyer un temps de trajet absurde (ex: 386 min
+// entre deux adresses de Montréal). Ce biais géographique force la recherche vers
+// le Québec pour éviter ce genre de faux résultat.
 function nettoyerAdressePourGoogleMaps(adresse) {
-  return String(adresse || "").replace(/\s*\[Secteur:[^\]]*\]\s*/gi, "").trim();
+  let nettoyee = String(adresse || "").replace(/\s*\[Secteur:[^\]]*\]\s*/gi, "").trim();
+  if (nettoyee && !/canada/i.test(nettoyee)) {
+    nettoyee = `${nettoyee}, Québec, Canada`;
+  }
+  return nettoyee;
 }
 
 async function getDrivingMinutes(originAddress, destAddress) {
