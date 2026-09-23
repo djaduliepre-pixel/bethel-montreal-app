@@ -1971,18 +1971,20 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
       const nomZoneParId = Object.fromEntries(zonesToutes.map((z) => [z.zone_id, z.zone_name]));
 
       // Groupe 1 : soumissions "Non" en attente.
-      // Exclut une personne seulement si elle est DÉJÀ membre actif dans un
-      // Bethel de la MÊME zone que celui qui cherche (ex: elle a dit "Non"
-      // il y a longtemps, puis "Oui" plus récemment et a déjà son propre Bethel
-      // dans cette zone). Un membre actif ailleurs, hors de cette zone (ex:
-      // coincé dans un vieux groupe hors-zone), reste visible pour ce leader.
-      const nomsDejaMembresDansZone = new Set(
-        membresActifs
-          .filter((m) => zoneParBethelId[m.bethel_id] === bethel.zone_id)
-          .map((m) => normaliseNom(`${m.first_name} ${m.last_name}`))
+      // Exclut une personne dès qu'elle est DÉJÀ membre actif QUELQUE PART,
+      // peu importe la zone. Avant, on ne l'excluait que si son Bethel actuel
+      // était dans la MÊME zone que celui qui cherche — mais une personne déjà
+      // membre ailleurs (ex: coincée dans un vieux groupe hors-zone à cause
+      // d'une incohérence de zone) restait visible comme "Assign", ce qui
+      // permettait de créer un DOUBLON en cliquant "Assign" au lieu de
+      // "Move here". Elle doit plutôt apparaître seulement dans le Groupe 2
+      // (membresMalPlaces) avec le bouton "Move here", qui transfère son
+      // dossier existant plutôt que d'en créer un nouveau.
+      const nomsDejaMembres = new Set(
+        membresActifs.map((m) => normaliseNom(`${m.first_name} ${m.last_name}`))
       );
       const pendantsFiltres = pendants
-        .filter((p) => !nomsDejaMembresDansZone.has(normaliseNom(`${p.first_name} ${p.last_name}`)))
+        .filter((p) => !nomsDejaMembres.has(normaliseNom(`${p.first_name} ${p.last_name}`)))
         .map((p) => ({ ...p, kind: "pending" }));
 
       // Groupe 2 : membres déjà actifs, mais coincés dans un Bethel d'une
