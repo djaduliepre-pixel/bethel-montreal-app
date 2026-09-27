@@ -4748,8 +4748,15 @@ function BethelAdminPortalInner() {
         supaGet("data_zones", "select=*&is_active=eq.true&order=zone_name.asc"),
         supaGet("campuses", "select=*&campus_code=eq.MTL"),
         supaGet("submissions", "select=*&order=submitted_at.desc&limit=5000"),
-        supaGet("bethels", "select=*&status=eq.active&order=created_at.desc&limit=5000"),
-        supaGetTout("members", "select=bethel_id,first_name,last_name,willing_to_host&status=eq.active"),
+        // Charge TOUS les Bethels (actifs ET inactifs) -- avant, le filtre
+        // "status=eq.active" excluait carrément les Bethels inactifs des
+        // données de l'appli, ce qui rendait les boutons de filtre
+        // "Active/Inactive" de l'écran Bethels inutiles (un Bethel inactif
+        // n'apparaissait jamais, même sous "Inactive" ou "All"), et le
+        // Bethel d'un membre inactif s'affichait comme "Bethel not found"
+        // dans Search Members.
+        supaGet("bethels", "select=*&order=created_at.desc&limit=5000"),
+        supaGetTout("members", "select=bethel_id,first_name,last_name,willing_to_host"),
       ]);
       setZones(zonesData);
       if (campusesData[0]) setCampusId(campusesData[0].campus_id);
