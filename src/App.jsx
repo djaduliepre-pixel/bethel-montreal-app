@@ -174,7 +174,7 @@ function loadGoogleMaps() {
 function nettoyerAdressePourGoogleMaps(adresse) {
   let nettoyee = String(adresse || "").replace(/\s*\[Secteur:[^\]]*\]\s*/gi, "").trim();
   if (nettoyee && !/canada/i.test(nettoyee)) {
-    nettoyee = `${nettoyee}, Québec, Canada`;
+    nettoyee = `${nettoyee}, Canada`;
   }
   return nettoyee;
 }
@@ -266,12 +266,12 @@ const ZONE_PAR_FSA = {
   'H1L':'Montreal Mercier–Hochelaga-Maisonneuve','H1M':'Montreal Mercier–Hochelaga-Maisonneuve',
   'H1N':'Montreal Mercier–Hochelaga-Maisonneuve','H1V':'Montreal Mercier–Hochelaga-Maisonneuve',
   'H1W':'Montreal Mercier–Hochelaga-Maisonneuve',
-  'H1T':'Montreal Rosemont–La Petite-Patrie','H1X':'Montreal Rosemont–La Petite-Patrie',
+  'H1X':'Montreal Rosemont–La Petite-Patrie',
   'H1Y':'Montreal Rosemont–La Petite-Patrie','H2G':'Montreal Rosemont–La Petite-Patrie','H2S':'Montreal Rosemont–La Petite-Patrie',
   'H1Z':'Montreal Saint-Michel','H2A':'Montreal Saint-Michel',
   'H2E':'Montreal Villeray','H2P':'Montreal Villeray','H2R':'Montreal Villeray',
   'H3N':'Montreal Parc-Extension',
-  'H1P':'Montreal Saint-Léonard','H1R':'Montreal Saint-Léonard','H1S':'Montreal Saint-Léonard',
+  'H1P':'Montreal Saint-Léonard','H1R':'Montreal Saint-Léonard','H1S':'Montreal Saint-Léonard','H1T':'Montreal Saint-Léonard',
   'H2V':'Montreal Outremont',
   'H3S':'Montreal Côte-des-Neiges–Notre-Dame-de-Grâce','H3T':'Montreal Côte-des-Neiges–Notre-Dame-de-Grâce',
   'H3V':'Montreal Côte-des-Neiges–Notre-Dame-de-Grâce','H3W':'Montreal Côte-des-Neiges–Notre-Dame-de-Grâce',
