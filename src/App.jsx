@@ -2729,7 +2729,7 @@ function DashboardView({ submissions, bethels, zones, onNavigate }) {
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Dashboard</h1>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Tableau de bord</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 24px" }}>
         Live data from your Supabase database — bethel-montreal-app.
       </p>
@@ -2820,7 +2820,7 @@ function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Submissions</h1>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Soumissions</h1>
           <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
             Real rows from your submissions table.
           </p>
@@ -3655,7 +3655,7 @@ function BethelSupervisionReport() {
     const groupes = {};
     rows.forEach((r) => {
       const cle = `${r.pastor}||${r.minister || "(unassigned)"}`;
-      if (!groupes[cle]) groupes[cle] = { pastor: r.pastor, minister: r.minister || "Unassigned", rows: [] };
+      if (!groupes[cle]) groupes[cle] = { pastor: r.pastor, minister: r.minister || "Non assigné", rows: [] };
       groupes[cle].rows.push(r);
     });
     return Object.values(groupes).map((g) => {
@@ -3673,10 +3673,10 @@ function BethelSupervisionReport() {
 
   function actionRequise(missingPastor, missingMinister, missingOverseer, missingLeader) {
     const actions = [];
-    if (missingPastor) actions.push("Assign Pastor");
-    if (missingMinister) actions.push("Assign Minister");
-    if (missingOverseer) actions.push("Assign Overseer");
-    if (missingLeader) actions.push("Assign Bethel Leader");
+    if (missingPastor) actions.push("Attribuer un Pasteur");
+    if (missingMinister) actions.push("Attribuer un Ministre");
+    if (missingOverseer) actions.push("Attribuer un Superviseur");
+    if (missingLeader) actions.push("Attribuer un Responsable de Bethel");
     return actions.join("; ") || "—";
   }
 
@@ -3716,7 +3716,7 @@ function BethelSupervisionReport() {
         background: complete ? "rgba(31,92,78,0.10)" : "rgba(162,59,51,0.10)",
         color: complete ? "var(--teal)" : "var(--brick)",
       }}>
-        {complete ? "Complete" : "Need Review"}
+        {complete ? "Complet" : "À réviser"}
       </span>
     );
   }
@@ -3748,7 +3748,7 @@ function BethelSupervisionReport() {
         background: needsReview ? "rgba(184,134,59,0.12)" : "rgba(31,92,78,0.10)",
         color: needsReview ? "var(--gold)" : "var(--teal)",
       }}>
-        {needsReview ? "Needs Review" : "OK"}
+        {needsReview ? "À réviser" : "Conforme"}
       </span>
     );
   }
@@ -3758,6 +3758,19 @@ function BethelSupervisionReport() {
     const [editingField, setEditingField] = useState(null); // "minister" | "overseer" | null
     const [saving, setSaving] = useState(false);
     const [drawerTab, setDrawerTab] = useState("chain");
+
+    // Les 3 sections ci-dessous n'ont pas encore de table dédiée dans la base :
+    // elles restent donc locales à cette session du panneau (non persistées côté Supabase).
+    const [rolesSpirituels, setRolesSpirituels] = useState([]);
+    const [personneRole, setPersonneRole] = useState("");
+    const [roleChoisi, setRoleChoisi] = useState("");
+    const [visites, setVisites] = useState([]);
+    const [nouvelleVisiteOuverte, setNouvelleVisiteOuverte] = useState(false);
+    const [visiteDate, setVisiteDate] = useState("");
+    const [visiteNote, setVisiteNote] = useState("");
+    const [notes, setNotes] = useState([]);
+    const [nouvelleNoteOuverte, setNouvelleNoteOuverte] = useState(false);
+    const [texteNote, setTexteNote] = useState("");
 
     if (!row) return null;
 
@@ -3773,12 +3786,37 @@ function BethelSupervisionReport() {
       }
     }
 
+    function attribuerRoleSpirituel() {
+      if (!personneRole.trim() || !roleChoisi) return;
+      setRolesSpirituels((prev) => [...prev, { personne: personneRole.trim(), role: roleChoisi }]);
+      setPersonneRole("");
+      setRoleChoisi("");
+    }
+
+    function ajouterVisite() {
+      if (!visiteDate) return;
+      setVisites((prev) => [{ date: visiteDate, note: visiteNote.trim() }, ...prev]);
+      setVisiteDate("");
+      setVisiteNote("");
+      setNouvelleVisiteOuverte(false);
+    }
+
+    function ajouterNote() {
+      if (!texteNote.trim()) return;
+      setNotes((prev) => [{ texte: texteNote.trim(), date: new Date().toLocaleDateString("fr-CA") }, ...prev]);
+      setTexteNote("");
+      setNouvelleNoteOuverte(false);
+    }
+
     const DRAWER_TABS = [
-      { id: "chain", label: "Chain" },
-      { id: "spiritual", label: "Spiritual Roles" },
-      { id: "visits", label: "Visit History" },
+      { id: "chain", label: "Chaîne" },
+      { id: "spiritual", label: "Rôles spirituels" },
+      { id: "visits", label: "Historique des visites" },
       { id: "notes", label: "Notes" },
     ];
+
+    const ROLES_CHAINE = ["Pasteur", "Ministre", "Superviseur"];
+    const ROLES_SPIRITUELS_AUTRES = ["Ananias", "Responsable de Bethel", "Louange", "Intercession", "Accueil"];
 
     function BlocChaine({ titre, valeur, champ, options, editable }) {
       const enEdition = editingField === champ;
@@ -3788,7 +3826,7 @@ function BethelSupervisionReport() {
             {titre}
           </div>
           <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--ink)", marginBottom: "10px" }}>
-            {!estValeurVide(valeur) ? valeur : <span style={{ color: "var(--brick)", fontWeight: 600 }}>Unassigned</span>}
+            {!estValeurVide(valeur) ? valeur : <span style={{ color: "var(--brick)", fontWeight: 600 }}>Non assigné</span>}
           </div>
           {enEdition ? (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
@@ -3798,10 +3836,10 @@ function BethelSupervisionReport() {
                 onChange={(e) => e.target.value && appliquer(champ, e.target.value)}
                 style={{ flex: 1, padding: "6px 8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px" }}
               >
-                <option value="" disabled>Select a {titre.toLowerCase()}…</option>
+                <option value="" disabled>Sélectionner un {titre.toLowerCase()}…</option>
                 {options.map((o) => <option key={o} value={o}>{o}</option>)}
               </select>
-              <button onClick={() => setEditingField(null)} disabled={saving} style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+              <button onClick={() => setEditingField(null)} disabled={saving} style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Annuler</button>
             </div>
           ) : (
             <div style={{ display: "flex", gap: "8px" }}>
@@ -3810,20 +3848,20 @@ function BethelSupervisionReport() {
                 disabled={!editable || saving || estValeurVide(valeur)}
                 style={{ padding: "5px 12px", borderRadius: "999px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink-muted)", fontSize: "11.5px", fontWeight: 600, cursor: (editable && !estValeurVide(valeur)) ? "pointer" : "not-allowed", opacity: (editable && !estValeurVide(valeur)) ? 1 : 0.5 }}
               >
-                Clear
+                Effacer
               </button>
               <button
                 onClick={() => setEditingField(champ)}
                 disabled={!editable || saving}
                 style={{ padding: "5px 12px", borderRadius: "999px", border: "1px solid var(--plum)", background: "var(--plum)", color: "#fff", fontSize: "11.5px", fontWeight: 600, cursor: editable ? "pointer" : "not-allowed", opacity: editable ? 1 : 0.5 }}
               >
-                Change
+                Modifier
               </button>
             </div>
           )}
           {!editable && (
             <div style={{ fontSize: "10.5px", color: "var(--ink-muted)", marginTop: "6px" }}>
-              Not yet editable — no Pastor assignment field exists in the data model.
+              Pas encore modifiable — aucun champ d'attribution de Pasteur n'existe dans le modèle de données.
             </div>
           )}
         </div>
@@ -3852,10 +3890,10 @@ function BethelSupervisionReport() {
               <PilleHealth complete={row.chainComplete} />
             </div>
             <div style={{ marginTop: "12px", fontSize: "12.5px", color: "var(--ink-muted)", lineHeight: 1.7 }}>
-              <div><strong style={{ color: "var(--ink)" }}>Minister:</strong> {row.minister || "—"}</div>
-              <div><strong style={{ color: "var(--ink)" }}>Overseer:</strong> {row.overseer || "—"}</div>
-              <div><strong style={{ color: "var(--ink)" }}>Bethel Leader:</strong> {row.bethelLeader || "—"}</div>
-              <div><strong style={{ color: "var(--ink)" }}>Last Visit:</strong> — <span style={{ fontSize: "11px" }}>(not tracked yet)</span></div>
+              <div><strong style={{ color: "var(--ink)" }}>Ministre :</strong> {row.minister || "—"}</div>
+              <div><strong style={{ color: "var(--ink)" }}>Superviseur :</strong> {row.overseer || "—"}</div>
+              <div><strong style={{ color: "var(--ink)" }}>Responsable :</strong> {row.bethelLeader || "—"}</div>
+              <div><strong style={{ color: "var(--ink)" }}>Dernière visite :</strong> {visites[0] ? visites[0].date : "—"} <span style={{ fontSize: "11px" }}>{visites[0] ? "" : "(aucune donnée pour le moment)"}</span></div>
             </div>
           </div>
 
@@ -3873,25 +3911,129 @@ function BethelSupervisionReport() {
           <div style={{ flex: 1, overflow: "auto", padding: "18px 20px" }}>
             {drawerTab === "chain" && (
               <div>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)", marginBottom: "12px" }}>Supervision Chain</div>
-                <BlocChaine titre="Pastor" valeur={row.pastor} champ="pastor" options={[]} editable={false} />
-                <BlocChaine titre="Minister" valeur={row.minister} champ="minister" options={ministersList} editable={true} />
-                <BlocChaine titre="Overseer" valeur={row.overseer} champ="overseer" options={overseersList} editable={true} />
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)", marginBottom: "12px" }}>Chaîne de supervision</div>
+                <BlocChaine titre="Pasteur" valeur={row.pastor} champ="pastor" options={[]} editable={false} />
+                <BlocChaine titre="Ministre" valeur={row.minister} champ="minister" options={ministersList} editable={true} />
+                <BlocChaine titre="Superviseur" valeur={row.overseer} champ="overseer" options={overseersList} editable={true} />
               </div>
             )}
+
             {drawerTab === "spiritual" && (
-              <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
-                Spiritual roles tracking is not yet part of this data model.
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)", marginBottom: "4px" }}>Attribuer un rôle spirituel</div>
+                <p style={{ fontSize: "11.5px", color: "var(--ink-muted)", margin: "0 0 12px", lineHeight: 1.5 }}>
+                  Attribuez un rôle de croissance spirituelle. Les rôles de la chaîne (Pasteur, Ministre, Superviseur) les rendent sélectionnables dans la chaîne de supervision.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "14px" }}>
+                  <div>
+                    <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>Personne</div>
+                    <input
+                      value={personneRole}
+                      onChange={(e) => setPersonneRole(e.target.value)}
+                      placeholder="Rechercher par nom..."
+                      style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px" }}
+                    />
+                  </div>
+                  <div>
+                    <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "4px" }}>Rôle</div>
+                    <select
+                      value={roleChoisi}
+                      onChange={(e) => setRoleChoisi(e.target.value)}
+                      style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px" }}
+                    >
+                      <option value="">Sélectionner un rôle...</option>
+                      {[...ROLES_CHAINE, ...ROLES_SPIRITUELS_AUTRES].map((r) => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </div>
+                  <button
+                    onClick={attribuerRoleSpirituel}
+                    disabled={!personneRole.trim() || !roleChoisi}
+                    style={{ padding: "7px 12px", borderRadius: "8px", border: "1px solid var(--plum)", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: (!personneRole.trim() || !roleChoisi) ? "not-allowed" : "pointer", opacity: (!personneRole.trim() || !roleChoisi) ? 0.5 : 1 }}
+                  >
+                    Attribuer le rôle
+                  </button>
+                </div>
+                {rolesSpirituels.length === 0 ? (
+                  <div style={{ color: "var(--ink-muted)", fontSize: "12.5px", textAlign: "center", padding: "20px 10px", border: "1px dashed var(--border)", borderRadius: "8px" }}>
+                    Aucun rôle attribué durant cette session.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {rolesSpirituels.map((r, i) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "12.5px" }}>
+                        <span>{r.personne}</span>
+                        <span style={{ color: "var(--plum)", fontWeight: 600 }}>{r.role}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
+
             {drawerTab === "visits" && (
-              <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
-                No visit history has been recorded for this Bethel yet.
+              <div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "12px" }}>
+                  <button
+                    onClick={() => setNouvelleVisiteOuverte((v) => !v)}
+                    style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--plum)", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    + Nouvelle visite
+                  </button>
+                </div>
+                {nouvelleVisiteOuverte && (
+                  <div style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "10px", marginBottom: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <input type="date" value={visiteDate} onChange={(e) => setVisiteDate(e.target.value)} style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "12.5px" }} />
+                    <textarea value={visiteNote} onChange={(e) => setVisiteNote(e.target.value)} placeholder="Notes de la visite..." rows={3} style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "12.5px", resize: "vertical" }} />
+                    <button onClick={ajouterVisite} disabled={!visiteDate} style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", fontWeight: 600, cursor: !visiteDate ? "not-allowed" : "pointer", opacity: !visiteDate ? 0.5 : 1 }}>Enregistrer</button>
+                  </div>
+                )}
+                {visites.length === 0 ? (
+                  <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
+                    Aucune visite de supervision enregistrée pour le moment.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {visites.map((v, i) => (
+                      <div key={i} style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 10px" }}>
+                        <div style={{ fontSize: "11.5px", fontWeight: 700, color: "var(--plum)" }}>{v.date}</div>
+                        {v.note && <div style={{ fontSize: "12.5px", color: "var(--ink)", marginTop: "2px" }}>{v.note}</div>}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
+
             {drawerTab === "notes" && (
-              <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
-                Notes are not yet supported for Bethels.
+              <div>
+                <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "12px" }}>
+                  <button
+                    onClick={() => setNouvelleNoteOuverte((v) => !v)}
+                    style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--plum)", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+                  >
+                    Ajouter une note
+                  </button>
+                </div>
+                {nouvelleNoteOuverte && (
+                  <div style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "10px", marginBottom: "12px", display: "flex", flexDirection: "column", gap: "8px" }}>
+                    <textarea value={texteNote} onChange={(e) => setTexteNote(e.target.value)} placeholder="Écrire une note..." rows={3} style={{ padding: "6px 8px", borderRadius: "6px", border: "1px solid var(--border)", fontSize: "12.5px", resize: "vertical" }} />
+                    <button onClick={ajouterNote} disabled={!texteNote.trim()} style={{ padding: "6px 12px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", fontWeight: 600, cursor: !texteNote.trim() ? "not-allowed" : "pointer", opacity: !texteNote.trim() ? 0.5 : 1 }}>Enregistrer</button>
+                  </div>
+                )}
+                {notes.length === 0 ? (
+                  <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
+                    Aucune note enregistrée pour le moment.
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                    {notes.map((n, i) => (
+                      <div key={i} style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 10px" }}>
+                        <div style={{ fontSize: "11px", color: "var(--ink-muted)" }}>{n.date}</div>
+                        <div style={{ fontSize: "12.5px", color: "var(--ink)", marginTop: "2px" }}>{n.texte}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -3901,28 +4043,28 @@ function BethelSupervisionReport() {
   }
 
   const SOUS_ONGLETS = [
-    { id: "bypastor", label: "By Pastor" },
-    { id: "summary", label: "Summary" },
+    { id: "bypastor", label: "Par Pasteur" },
+    { id: "summary", label: "Résumé" },
     { id: "leadership", label: "Leadership" },
-    { id: "actionview", label: "Action View" },
-    { id: "dataquality", label: "Data Quality" },
+    { id: "actionview", label: "Actions requises" },
+    { id: "dataquality", label: "Qualité des données" },
   ];
 
   const thStyle = { padding: "8px 10px", textAlign: "left", fontSize: "10.5px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid var(--border)" };
   const tdStyle = { padding: "9px 10px", fontSize: "12.5px", color: "var(--ink)", borderBottom: "1px solid var(--border)" };
 
   if (loading) {
-    return <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading supervision chain…</div>;
+    return <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Chargement de la chaîne de supervision…</div>;
   }
   if (loadError) {
-    return <div style={{ fontSize: "13px", color: "var(--brick)" }}>Error: {loadError}</div>;
+    return <div style={{ fontSize: "13px", color: "var(--brick)" }}>Erreur : {loadError}</div>;
   }
 
   return (
     <div>
-      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "0 0 4px" }}>Bethel Supervision</h2>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "0 0 4px" }}>Supervision des Bethels</h2>
       <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 16px" }}>
-        Supervision chain: Pastor → Minister → Overseer → Bethel Leader → Bethel · TG Montreal
+        Chaîne de supervision : Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel · TG Montréal
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "18px", flexWrap: "wrap" }}>
@@ -3941,30 +4083,30 @@ function BethelSupervisionReport() {
       {subTab === "bypastor" && (
         <div>
           <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginBottom: "20px" }}>
-            <StatCard label="Pastor Groups" value={Object.keys(parPasteur).length} />
-            <StatCard label="Ministers" value={new Set(rows.map((r) => r.minister).filter((v) => !estValeurVide(v))).size} accent="var(--plum)" />
-            <StatCard label="Overseers" value={new Set(rows.map((r) => r.overseer).filter((v) => !estValeurVide(v))).size} accent="var(--teal)" />
+            <StatCard label="Groupes pastoraux" value={Object.keys(parPasteur).length} />
+            <StatCard label="Ministres" value={new Set(rows.map((r) => r.minister).filter((v) => !estValeurVide(v))).size} accent="var(--plum)" />
+            <StatCard label="Superviseurs" value={new Set(rows.map((r) => r.overseer).filter((v) => !estValeurVide(v))).size} accent="var(--teal)" />
             <StatCard label="Bethels" value={rows.length} />
-            <StatCard label="Need Review" value={incompletes.length} accent={incompletes.length ? "var(--brick)" : "var(--teal)"} />
+            <StatCard label="À réviser" value={incompletes.length} accent={incompletes.length ? "var(--brick)" : "var(--teal)"} />
           </div>
 
           {Object.entries(parPasteur).map(([pastor, rs]) => (
             <div key={pastor} style={{ marginBottom: "22px" }}>
               <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--plum)", marginBottom: "8px" }}>
-                Pastor {pastor}
+                Pasteur {pastor}
               </div>
               <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
                 <table style={{ borderCollapse: "collapse", width: "100%" }}>
                   <thead>
                     <tr style={{ background: "var(--bg)" }}>
-                      <th style={thStyle}>Minister</th>
-                      <th style={thStyle}>Overseer</th>
-                      <th style={thStyle}>Bethel Leader</th>
-                      <th style={thStyle}>Church ID</th>
-                      <th style={thStyle}>Bethel Name</th>
+                      <th style={thStyle}>Ministre</th>
+                      <th style={thStyle}>Superviseur</th>
+                      <th style={thStyle}>Responsable Bethel</th>
+                      <th style={thStyle}>Code Bethel (Church ID)</th>
+                      <th style={thStyle}>Nom du Bethel</th>
                       <th style={thStyle}>Zone</th>
-                      <th style={thStyle}>Chain</th>
-                      <th style={thStyle}>Health</th>
+                      <th style={thStyle}>Chaîne</th>
+                      <th style={thStyle}>État</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -3998,12 +4140,12 @@ function BethelSupervisionReport() {
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
               <tr style={{ background: "var(--bg)" }}>
-                <th style={thStyle}>Pastor</th>
-                <th style={thStyle}>Ministers</th>
-                <th style={thStyle}>Overseers</th>
+                <th style={thStyle}>Pasteur</th>
+                <th style={thStyle}>Ministres</th>
+                <th style={thStyle}>Superviseurs</th>
                 <th style={thStyle}>Bethels</th>
-                <th style={thStyle}>Incomplete Chains</th>
-                <th style={thStyle}>Priority</th>
+                <th style={thStyle}>Chaînes incomplètes</th>
+                <th style={thStyle}>Priorité</th>
               </tr>
             </thead>
             <tbody>
@@ -4020,7 +4162,7 @@ function BethelSupervisionReport() {
                       background: s.priority === "High" ? "rgba(162,59,51,0.10)" : s.priority === "Medium" ? "rgba(184,134,59,0.12)" : "rgba(31,92,78,0.10)",
                       color: s.priority === "High" ? "var(--brick)" : s.priority === "Medium" ? "var(--gold)" : "var(--teal)",
                     }}>
-                      {s.priority}
+                      {s.priority === "High" ? "Élevée" : s.priority === "Medium" ? "Moyenne" : "Faible"}
                     </span>
                   </td>
                 </tr>
@@ -4035,13 +4177,13 @@ function BethelSupervisionReport() {
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
               <tr style={{ background: "var(--bg)" }}>
-                <th style={thStyle}>Pastor</th>
-                <th style={thStyle}>Minister</th>
-                <th style={thStyle}>Overseers</th>
+                <th style={thStyle}>Pasteur</th>
+                <th style={thStyle}>Ministre</th>
+                <th style={thStyle}>Superviseurs</th>
                 <th style={thStyle}>Bethels</th>
-                <th style={thStyle}>Missing Overseer</th>
-                <th style={thStyle}>Missing Leader</th>
-                <th style={thStyle}>Review</th>
+                <th style={thStyle}>Superviseur manquant</th>
+                <th style={thStyle}>Responsable manquant</th>
+                <th style={thStyle}>Révision</th>
               </tr>
             </thead>
             <tbody>
@@ -4064,23 +4206,23 @@ function BethelSupervisionReport() {
       {subTab === "actionview" && (
         <div>
           <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 14px" }}>
-            {incompletes.length} bethels with incomplete supervision chains. Use this view for assignment meetings.
+            {incompletes.length} Bethels avec une chaîne de supervision incomplète. Utilisez cette vue pour les réunions d'attribution.
           </p>
           {incompletes.length === 0 ? (
             <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
-              Every supervision chain is complete. 🎉
+              Toutes les chaînes de supervision sont complètes. 🎉
             </div>
           ) : (
             <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
               <table style={{ borderCollapse: "collapse", width: "100%" }}>
                 <thead>
                   <tr style={{ background: "var(--bg)" }}>
-                    <th style={thStyle}>Pastor</th>
-                    <th style={thStyle}>Minister</th>
-                    <th style={thStyle}>Overseer</th>
-                    <th style={thStyle}>Bethel Leader</th>
+                    <th style={thStyle}>Pasteur</th>
+                    <th style={thStyle}>Ministre</th>
+                    <th style={thStyle}>Superviseur</th>
+                    <th style={thStyle}>Responsable Bethel</th>
                     <th style={thStyle}>Bethel</th>
-                    <th style={thStyle}>Action Required</th>
+                    <th style={thStyle}>Action requise</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -4108,26 +4250,26 @@ function BethelSupervisionReport() {
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
               <tr style={{ background: "var(--bg)" }}>
-                <th style={thStyle}>Issue Type</th>
-                <th style={thStyle}>Current Value</th>
+                <th style={thStyle}>Type de problème</th>
+                <th style={thStyle}>Valeur actuelle</th>
                 <th style={thStyle}>Observation</th>
-                <th style={thStyle}>Recommended Action</th>
+                <th style={thStyle}>Action recommandée</th>
               </tr>
             </thead>
             <tbody>
               <tr>
-                <td style={{ ...tdStyle, fontWeight: 600 }}>Missing assignments</td>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>Attributions manquantes</td>
                 <td style={tdStyle}>
-                  0 Pastor / {qualiteDonnees.missingMinisterCount} Minister / {qualiteDonnees.missingOverseerCount} Overseer / {qualiteDonnees.missingLeaderCount} Bethel Leader non assignés
+                  0 Pasteur / {qualiteDonnees.missingMinisterCount} Ministre / {qualiteDonnees.missingOverseerCount} Superviseur / {qualiteDonnees.missingLeaderCount} Responsable de Bethel non assignés
                 </td>
-                <td style={tdStyle}>Some records do not yet have a complete supervision chain.</td>
-                <td style={tdStyle}>Prioritize Overseer and Bethel Leader assignment, then complete upper-level gaps.</td>
+                <td style={tdStyle}>Certaines fiches n'ont pas encore une chaîne de supervision complète.</td>
+                <td style={tdStyle}>Prioriser l'attribution du Superviseur et du Responsable de Bethel, puis compléter les niveaux supérieurs.</td>
               </tr>
               <tr>
-                <td style={{ ...tdStyle, fontWeight: 600 }}>Missing bethel record</td>
-                <td style={tdStyle}>{qualiteDonnees.noRecordCount} Bethels have no chain record</td>
-                <td style={tdStyle}>Some Bethels are not connected to any supervision chain.</td>
-                <td style={tdStyle}>Assign Pastor, Minister, and Overseer for each unlinked Bethel.</td>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>Fiche Bethel manquante</td>
+                <td style={tdStyle}>{qualiteDonnees.noRecordCount} Bethels sans fiche de chaîne</td>
+                <td style={tdStyle}>Certains Bethels ne sont reliés à aucune chaîne de supervision.</td>
+                <td style={tdStyle}>Attribuer un Pasteur, un Ministre et un Superviseur pour chaque Bethel non relié.</td>
               </tr>
             </tbody>
           </table>
@@ -4169,13 +4311,13 @@ const [tab, setTab] = useState("hosting");
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Reports</h1>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Rapports</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : tab === "zonemismatch" ? "Bethels whose zone doesn't match their address." : tab === "bethelsupervision" ? "Full Pastor → Minister → Overseer → Bethel Leader → Bethel chain, by health status." : tab === "supervision" ? "Auto-generated from supervision chain fields." : tab === "orgchart" ? "Full hierarchy, from Ministre Ordonné down to Bethel Leader." : "Members whose own address doesn't match their Bethel's zone."}
+        {tab === "hosting" ? "Disponibilité pour héberger, par niveau de leadership." : tab === "gaps" ? "Membres avec des informations clés manquantes." : tab === "zonemismatch" ? "Bethels dont la zone ne correspond pas à leur adresse." : tab === "bethelsupervision" ? "Chaîne complète Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel, par état." : tab === "supervision" ? "Généré automatiquement à partir des champs de la chaîne de supervision." : tab === "orgchart" ? "Hiérarchie complète, du Ministre Ordonné jusqu'au Responsable de Bethel." : "Membres dont l'adresse ne correspond pas à la zone de leur Bethel."}
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }, { id: "membermismatch", label: "Member Address Mismatches" }, { id: "bethelsupervision", label: "Bethel Supervision" }, { id: "supervision", label: "Supervision Grid" }, { id: "orgchart", label: "Org Chart" }].map((t) => (
+        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "supervision", label: "Grille de supervision" }, { id: "orgchart", label: "Organigramme" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -4359,7 +4501,7 @@ function SearchMembersView({ bethels, onOpenBethel }) {
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Search Members</h1>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Recherche membres</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
         Find any of your {bethels.length ? "1200+" : ""} members, or search by city/zone (e.g. "Anjou").
       </p>
@@ -4441,14 +4583,14 @@ function SearchMembersView({ bethels, onOpenBethel }) {
 /* App                                                                 */
 /* ------------------------------------------------------------------ */
 const NAV = [
-  { id: "dashboard", label: "Dashboard", icon: Home },
-  { id: "submissions", label: "Submissions", icon: Inbox },
+  { id: "dashboard", label: "Tableau de bord", icon: Home },
+  { id: "submissions", label: "Soumissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
-  { id: "manage-members", label: "Add / Remove Members", icon: Plus },
-  { id: "search", label: "Search Members", icon: Search },
-  { id: "devotions", label: "Devotions", icon: BookOpen },
-  { id: "reports", label: "Reports", icon: BarChart3 },
-  { id: "zones", label: "Zone Lookup", icon: MapPin },
+  { id: "manage-members", label: "Gérer les membres", icon: Plus },
+  { id: "search", label: "Recherche membres", icon: Search },
+  { id: "devotions", label: "Dévotions", icon: BookOpen },
+  { id: "reports", label: "Rapports", icon: BarChart3 },
+  { id: "zones", label: "Recherche de zone", icon: MapPin },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -5088,7 +5230,7 @@ function DevotionsView() {
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
         <div>
-          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Devotions</h1>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Dévotions</h1>
           <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
             Weekly devotion compliance vs {Math.round(OBJECTIF_DEVOTION * 100)}% goal, by role.
           </p>
@@ -5557,11 +5699,11 @@ function BethelAdminPortalInner() {
           padding: "8px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--bg)",
           color: "var(--ink-muted)", fontSize: "12px", cursor: "pointer",
         }}>
-          <RefreshCw size={13} /> Refresh from Supabase
+          <RefreshCw size={13} /> Actualiser depuis Supabase
         </button>
         <div style={{ marginTop: "14px", display: "flex", alignItems: "center", gap: "8px", padding: "8px 10px" }}>
           <UserButton afterSignOutUrl="/" />
-          <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Signed in</span>
+          <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>Connecté</span>
         </div>
       </aside>
 
