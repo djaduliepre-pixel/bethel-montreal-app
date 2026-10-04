@@ -4292,6 +4292,205 @@ function BethelSupervisionReport() {
   );
 }
 
+// --- "Bethel Supervision Format" -----------------------------------------
+// Reproduit le format du classeur officiel (onglet CAMPUS) : une ligne par
+// Bethel, avec les coordonnées complètes (prénom, nom, téléphone, courriel,
+// zone, adresse) du Ministre, du Superviseur et du Responsable de Bethel,
+// plus le Pasteur et le numéro de Bethel ("Bethel#").
+function BethelSupervisionFormatView() {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [rows, setRows] = useState([]);
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const [bethelsData, membersData, zonesData] = await Promise.all([
+          supaGetTout("bethels", "status=eq.active&select=bethel_id,hp_number,church_id,bethel_name_officiel,zone_id"),
+          supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,email,address,city,bethel_id,overseer_name,ordained_minister_name"),
+          supaGetTout("data_zones", "is_active=eq.true&select=zone_id,zone_code,zone_name"),
+        ]);
+
+        const zoneById = Object.fromEntries(zonesData.map((z) => [z.zone_id, z]));
+        const bethelById = Object.fromEntries(bethelsData.map((b) => [b.bethel_id, b]));
+        const nomZoneDuBethel = (bethelId) => {
+          const b = bethelById[bethelId];
+          const z = b && zoneById[b.zone_id];
+          return z?.zone_name || z?.zone_code || "";
+        };
+
+        const membresParBethel = {};
+        membersData.forEach((m) => {
+          if (!m.bethel_id) return;
+          (membresParBethel[m.bethel_id] = membresParBethel[m.bethel_id] || []).push(m);
+        });
+
+        // Fiches de contact des Ministres et Superviseurs, indexées par nom normalisé,
+        // pour retrouver leur téléphone/courriel/adresse même quand leur nom n'apparaît
+        // qu'en texte libre (ordained_minister_name / overseer_name) sur les fiches des membres.
+        const ministresParNom = {};
+        const overseersParNom = {};
+        membersData.forEach((m) => {
+          const cle = normaliseNom(`${m.first_name || ""} ${m.last_name || ""}`);
+          if (!cle) return;
+          if (m.role === "Ministre Ordonné") ministresParNom[cle] = m;
+          if (m.role === "Overseer") overseersParNom[cle] = m;
+        });
+
+        function contactDepuisTexte(nomTexte, index) {
+          const fiche = index[normaliseNom(nomTexte)];
+          if (fiche) {
+            return {
+              firstName: fiche.first_name || "",
+              lastName: fiche.last_name || "",
+              phone: fiche.phone || "",
+              email: fiche.email || "",
+              zone: fiche.city || nomZoneDuBethel(fiche.bethel_id) || "",
+              address: fiche.address || "",
+            };
+          }
+          // Pas de fiche membre retrouvée pour ce nom : on garde au moins le nom tel quel.
+          const mots = (nomTexte || "").trim().split(/\s+/);
+          return {
+            firstName: mots[0] || "",
+            lastName: mots.slice(1).join(" "),
+            phone: "", email: "", zone: "", address: "",
+          };
+        }
+
+        const construites = bethelsData.map((b) => {
+          const equipe = membresParBethel[b.bethel_id] || [];
+          const leaderMembre = equipe.find((m) => m.role === "Bethel Leader") || null;
+          const reference = leaderMembre || equipe[0] || null;
+
+          const ministerTexte = reference?.ordained_minister_name || "";
+          const overseerTexte = reference?.overseer_name || "";
+
+          return {
+            bethelId: b.bethel_id,
+            pastor: CAMPUS_PASTOR,
+            minister: !estValeurVide(ministerTexte) ? contactDepuisTexte(ministerTexte, ministresParNom) : null,
+            overseer: !estValeurVide(overseerTexte) ? contactDepuisTexte(overseerTexte, overseersParNom) : null,
+            bethelNumber: b.hp_number || b.bethel_name_officiel || "—",
+            leader: leaderMembre ? {
+              firstName: leaderMembre.first_name || "",
+              lastName: leaderMembre.last_name || "",
+              phone: leaderMembre.phone || "",
+              email: leaderMembre.email || "",
+              zone: leaderMembre.city || nomZoneDuBethel(b.bethel_id) || "",
+              address: leaderMembre.address || "",
+            } : null,
+            ministerKey: normaliseNom(ministerTexte) || "(non assigné)",
+            ministerLabel: !estValeurVide(ministerTexte) ? ministerTexte : "Non assigné",
+          };
+        });
+
+        setRows(construites);
+      } catch (e) {
+        setLoadError(e.message);
+        setRows([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  const parPasteur = useMemo(() => {
+    const groupes = {};
+    rows.forEach((r) => {
+      if (!groupes[r.pastor]) groupes[r.pastor] = [];
+      groupes[r.pastor].push(r);
+    });
+    return groupes;
+  }, [rows]);
+
+  const thStyle = { padding: "8px 10px", textAlign: "left", fontSize: "10px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const tdStyle = { padding: "8px 10px", fontSize: "12px", color: "var(--ink)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const groupHeadStyle = { padding: "6px 10px", fontSize: "10.5px", fontWeight: 700, color: "var(--plum)", background: "rgba(107,42,62,0.06)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+
+  function Personne({ p }) {
+    if (!p) return <td colSpan={6} style={{ ...tdStyle, color: "var(--brick)", fontWeight: 600 }}>Non assigné</td>;
+    return (
+      <>
+        <td style={tdStyle}>{p.firstName || "—"}</td>
+        <td style={tdStyle}>{p.lastName || "—"}</td>
+        <td style={tdStyle}>{p.phone || "—"}</td>
+        <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{p.email || "—"}</td>
+        <td style={tdStyle}>{p.zone || "—"}</td>
+        <td style={{ ...tdStyle, whiteSpace: "normal", minWidth: "180px" }}>{p.address || "—"}</td>
+      </>
+    );
+  }
+
+  if (loading) {
+    return <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Chargement du format de supervision…</div>;
+  }
+  if (loadError) {
+    return <div style={{ fontSize: "13px", color: "var(--brick)" }}>Erreur : {loadError}</div>;
+  }
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "0 0 4px" }}>Format de supervision des Bethels</h2>
+      <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 16px" }}>
+        Format calqué sur le classeur officiel : coordonnées complètes du Ministre, du Superviseur et du Responsable de Bethel, par Pasteur.
+      </p>
+
+      {Object.entries(parPasteur).map(([pastor, rs]) => {
+        // Regroupe par Ministre pour suivre l'ordre du classeur (bloc Ministre -> Bethels).
+        const parMinistre = {};
+        rs.forEach((r) => {
+          (parMinistre[r.ministerKey] = parMinistre[r.ministerKey] || { label: r.ministerLabel, rows: [] }).rows.push(r);
+        });
+
+        return (
+          <div key={pastor} style={{ marginBottom: "26px" }}>
+            <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--plum)", marginBottom: "8px" }}>
+              Pasteur {pastor}
+            </div>
+            <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead>
+                  <tr style={{ background: "var(--bg)" }}>
+                    <th style={thStyle} rowSpan={2}>Bethel#</th>
+                    <th style={{ ...thStyle, textAlign: "center" }} colSpan={6}>Ministre</th>
+                    <th style={{ ...thStyle, textAlign: "center" }} colSpan={6}>Superviseur</th>
+                    <th style={{ ...thStyle, textAlign: "center" }} colSpan={6}>Responsable de Bethel</th>
+                  </tr>
+                  <tr style={{ background: "var(--bg)" }}>
+                    {["Prénom", "Nom", "Téléphone", "Courriel", "Zone", "Adresse"].map((h) => <th key={"m" + h} style={thStyle}>{h}</th>)}
+                    {["Prénom", "Nom", "Téléphone", "Courriel", "Zone", "Adresse"].map((h) => <th key={"o" + h} style={thStyle}>{h}</th>)}
+                    {["Prénom", "Nom", "Téléphone", "Courriel", "Zone", "Adresse"].map((h) => <th key={"l" + h} style={thStyle}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.values(parMinistre).map((groupe, gi) => (
+                    <React.Fragment key={gi}>
+                      <tr>
+                        <td colSpan={19} style={groupHeadStyle}>Ministre : {groupe.label}</td>
+                      </tr>
+                      {groupe.rows.map((r) => (
+                        <tr key={r.bethelId}>
+                          <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-muted)" }}>{r.bethelNumber}</td>
+                          <Personne p={r.minister} />
+                          <Personne p={r.overseer} />
+                          <Personne p={r.leader} />
+                        </tr>
+                      ))}
+                    </React.Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 function ReportsView({ submissions, bethels, zones, onChanged }) {
 
   
@@ -4313,11 +4512,11 @@ const [tab, setTab] = useState("hosting");
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Rapports</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        {tab === "hosting" ? "Disponibilité pour héberger, par niveau de leadership." : tab === "gaps" ? "Membres avec des informations clés manquantes." : tab === "zonemismatch" ? "Bethels dont la zone ne correspond pas à leur adresse." : tab === "bethelsupervision" ? "Chaîne complète Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel, par état." : tab === "supervision" ? "Généré automatiquement à partir des champs de la chaîne de supervision." : tab === "orgchart" ? "Hiérarchie complète, du Ministre Ordonné jusqu'au Responsable de Bethel." : "Membres dont l'adresse ne correspond pas à la zone de leur Bethel."}
+        {tab === "hosting" ? "Disponibilité pour héberger, par niveau de leadership." : tab === "gaps" ? "Membres avec des informations clés manquantes." : tab === "zonemismatch" ? "Bethels dont la zone ne correspond pas à leur adresse." : tab === "bethelsupervision" ? "Chaîne complète Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel, par état." : tab === "supervision" ? "Format calqué sur le classeur officiel, avec les coordonnées complètes de chaque niveau de la chaîne." : tab === "orgchart" ? "Hiérarchie complète, du Ministre Ordonné jusqu'au Responsable de Bethel." : "Membres dont l'adresse ne correspond pas à la zone de leur Bethel."}
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "supervision", label: "Grille de supervision" }, { id: "orgchart", label: "Organigramme" }].map((t) => (
+        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "supervision", label: "Format de supervision des Bethels" }, { id: "orgchart", label: "Organigramme" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -4332,7 +4531,7 @@ const [tab, setTab] = useState("hosting");
       {tab === "bethelsupervision" ? (
         <BethelSupervisionReport />
       ) : tab === "supervision" ? (
-        <SupervisionGridView />
+        <BethelSupervisionFormatView />
       ) : tab === "orgchart" ? (
         <OrgChartView />
       ) : tab === "hosting" ? (
