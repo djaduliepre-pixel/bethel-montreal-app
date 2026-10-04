@@ -2471,11 +2471,6 @@ function SupervisionGridView() {
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Supervision Grid</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>
-        Campus Pastor: TG Montreal — auto-generated from supervision chain fields.
-      </p>
-
       {!formOuvert ? (
         <button onClick={() => setFormOuvert(true)} style={{
           display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px",
@@ -2697,11 +2692,6 @@ function OrgChartView() {
 
   return (
     <div>
-      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Org Chart</h1>
-      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 20px" }}>
-        Auto-generated from each member's supervision chain fields. Click a row to expand.
-      </p>
-
       {loading ? (
         <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
       ) : arbre.ministres.length === 0 ? (
@@ -3986,11 +3976,11 @@ const [tab, setTab] = useState("hosting");
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Reports</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : tab === "zonemismatch" ? "Bethels whose zone doesn't match their address." : tab === "bethelsupervision" ? "Full Pastor → Minister → Overseer → Bethel Leader → Bethel chain, by health status." : "Members whose own address doesn't match their Bethel's zone."}
+        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : tab === "zonemismatch" ? "Bethels whose zone doesn't match their address." : tab === "bethelsupervision" ? "Full Pastor → Minister → Overseer → Bethel Leader → Bethel chain, by health status." : tab === "supervision" ? "Auto-generated from supervision chain fields." : tab === "orgchart" ? "Full hierarchy, from Ministre Ordonné down to Bethel Leader." : "Members whose own address doesn't match their Bethel's zone."}
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }, { id: "membermismatch", label: "Member Address Mismatches" }, { id: "bethelsupervision", label: "Bethel Supervision" }].map((t) => (
+        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }, { id: "membermismatch", label: "Member Address Mismatches" }, { id: "bethelsupervision", label: "Bethel Supervision" }, { id: "supervision", label: "Supervision Grid" }, { id: "orgchart", label: "Org Chart" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -4004,6 +3994,10 @@ const [tab, setTab] = useState("hosting");
 
       {tab === "bethelsupervision" ? (
         <BethelSupervisionReport />
+      ) : tab === "supervision" ? (
+        <SupervisionGridView />
+      ) : tab === "orgchart" ? (
+        <OrgChartView />
       ) : tab === "hosting" ? (
         submissions.length === 0 ? (
           <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
@@ -4258,8 +4252,6 @@ const NAV = [
   { id: "manage-members", label: "Add / Remove Members", icon: Plus },
   { id: "search", label: "Search Members", icon: Search },
   { id: "devotions", label: "Devotions", icon: BookOpen },
-  { id: "orgchart", label: "Org Chart", icon: Network },
-  { id: "supervision", label: "Supervision Grid", icon: BarChart3 },
   { id: "reports", label: "Reports", icon: BarChart3 },
   { id: "zones", label: "Zone Lookup", icon: MapPin },
 ];
@@ -5404,8 +5396,6 @@ function BethelAdminPortalInner() {
             {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
-            {view === "orgchart" && <OrgChartView />}
-            {view === "supervision" && <SupervisionGridView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} zones={zones} onChanged={loadAll} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
