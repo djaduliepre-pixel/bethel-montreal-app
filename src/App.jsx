@@ -3556,6 +3556,9 @@ function BethelSupervisionReport() {
   const [loadError, setLoadError] = useState(null);
   const [rows, setRows] = useState([]);
   const [subTab, setSubTab] = useState("bypastor");
+  const [drawerBethelId, setDrawerBethelId] = useState(null);
+  const [ministersList, setMinistersList] = useState([]);
+  const [overseersList, setOverseersList] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -3574,6 +3577,16 @@ function BethelSupervisionReport() {
           if (!m.bethel_id) return;
           (membresParBethel[m.bethel_id] = membresParBethel[m.bethel_id] || []).push(m);
         });
+
+        // Listes de candidats pour les sélecteurs [Change] du panneau latéral
+        const nomsMinistres = Array.from(new Set(
+          membersData.filter((m) => m.role === "Ministre Ordonné").map((m) => `${m.first_name} ${m.last_name}`.trim())
+        )).sort();
+        const nomsOverseers = Array.from(new Set(
+          membersData.filter((m) => m.role === "Overseer").map((m) => `${m.first_name} ${m.last_name}`.trim())
+        )).sort();
+        setMinistersList(nomsMinistres);
+        setOverseersList(nomsOverseers);
 
         const construites = bethelsData.map((b) => {
           const equipe = membresParBethel[b.bethel_id] || [];
@@ -3677,6 +3690,23 @@ function BethelSupervisionReport() {
     return { missingMinisterCount, missingOverseerCount, missingLeaderCount, noRecordCount };
   }, [rows]);
 
+  // --- Édition en direct de la chaîne de supervision depuis le panneau latéral ---
+  // Le nom est dénormalisé sur chaque fiche membre du Bethel : on met donc à jour
+  // TOUS les membres de ce bethel_id (comme pour les mises à jour précédentes de ce type).
+  async function majChaineSupervision(bethelId, champ, valeur) {
+    const colonne = champ === "minister" ? "ordained_minister_name" : "overseer_name";
+    await supaPatch("members", `bethel_id=eq.${bethelId}`, { [colonne]: valeur || null });
+    setRows((prev) => prev.map((r) => {
+      if (r.bethelId !== bethelId) return r;
+      const maj = { ...r, [champ]: valeur || "" };
+      maj.missingMinister = estValeurVide(maj.minister);
+      maj.missingOverseer = estValeurVide(maj.overseer);
+      maj.missingLeader = estValeurVide(maj.bethelLeader);
+      maj.chainComplete = !maj.missingMinister && !maj.missingOverseer && !maj.missingLeader;
+      return maj;
+    }));
+  }
+
   // --- Petits composants d'affichage réutilisés dans les 5 sous-onglets ---
 
   function PilleHealth({ complete }) {
@@ -3720,6 +3750,153 @@ function BethelSupervisionReport() {
       }}>
         {needsReview ? "Needs Review" : "OK"}
       </span>
+    );
+  }
+
+  // --- Panneau latéral coulissant (drawer) : détail + édition de la chaîne de supervision ---
+  function BethelDrawer({ row, onClose }) {
+    const [editingField, setEditingField] = useState(null); // "minister" | "overseer" | null
+    const [saving, setSaving] = useState(false);
+    const [drawerTab, setDrawerTab] = useState("chain");
+
+    if (!row) return null;
+
+    async function appliquer(champ, valeur) {
+      setSaving(true);
+      try {
+        await majChaineSupervision(row.bethelId, champ, valeur);
+        setEditingField(null);
+      } catch (e) {
+        alert("Erreur lors de la mise à jour : " + e.message);
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    const DRAWER_TABS = [
+      { id: "chain", label: "Chain" },
+      { id: "spiritual", label: "Spiritual Roles" },
+      { id: "visits", label: "Visit History" },
+      { id: "notes", label: "Notes" },
+    ];
+
+    function BlocChaine({ titre, valeur, champ, options, editable }) {
+      const enEdition = editingField === champ;
+      return (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "14px", marginBottom: "12px" }}>
+          <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: "6px" }}>
+            {titre}
+          </div>
+          <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--ink)", marginBottom: "10px" }}>
+            {!estValeurVide(valeur) ? valeur : <span style={{ color: "var(--brick)", fontWeight: 600 }}>Unassigned</span>}
+          </div>
+          {enEdition ? (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <select
+                defaultValue=""
+                disabled={saving}
+                onChange={(e) => e.target.value && appliquer(champ, e.target.value)}
+                style={{ flex: 1, padding: "6px 8px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px" }}
+              >
+                <option value="" disabled>Select a {titre.toLowerCase()}…</option>
+                {options.map((o) => <option key={o} value={o}>{o}</option>)}
+              </select>
+              <button onClick={() => setEditingField(null)} disabled={saving} style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={() => appliquer(champ, null)}
+                disabled={!editable || saving || estValeurVide(valeur)}
+                style={{ padding: "5px 12px", borderRadius: "999px", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink-muted)", fontSize: "11.5px", fontWeight: 600, cursor: (editable && !estValeurVide(valeur)) ? "pointer" : "not-allowed", opacity: (editable && !estValeurVide(valeur)) ? 1 : 0.5 }}
+              >
+                Clear
+              </button>
+              <button
+                onClick={() => setEditingField(champ)}
+                disabled={!editable || saving}
+                style={{ padding: "5px 12px", borderRadius: "999px", border: "1px solid var(--plum)", background: "var(--plum)", color: "#fff", fontSize: "11.5px", fontWeight: 600, cursor: editable ? "pointer" : "not-allowed", opacity: editable ? 1 : 0.5 }}
+              >
+                Change
+              </button>
+            </div>
+          )}
+          {!editable && (
+            <div style={{ fontSize: "10.5px", color: "var(--ink-muted)", marginTop: "6px" }}>
+              Not yet editable — no Pastor assignment field exists in the data model.
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(20,16,20,0.35)", zIndex: 60 }} />
+        <div style={{
+          position: "fixed", top: 0, right: 0, bottom: 0, width: "420px", maxWidth: "92vw",
+          background: "var(--surface)", borderLeft: "1px solid var(--border)", boxShadow: "-12px 0 32px rgba(0,0,0,0.18)",
+          zIndex: 61, display: "flex", flexDirection: "column", overflow: "hidden",
+        }}>
+          <div style={{ padding: "18px 20px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+              <div>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: "17px", fontWeight: 700, color: "var(--ink)" }}>{row.bethelName}</div>
+                <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginTop: "2px" }}>
+                  {row.zone} · {row.churchId || "—"}
+                </div>
+              </div>
+              <button onClick={onClose} style={{ border: "none", background: "transparent", cursor: "pointer", color: "var(--ink-muted)", fontSize: "20px", lineHeight: 1, padding: "4px" }}>×</button>
+            </div>
+            <div style={{ marginTop: "10px" }}>
+              <PilleHealth complete={row.chainComplete} />
+            </div>
+            <div style={{ marginTop: "12px", fontSize: "12.5px", color: "var(--ink-muted)", lineHeight: 1.7 }}>
+              <div><strong style={{ color: "var(--ink)" }}>Minister:</strong> {row.minister || "—"}</div>
+              <div><strong style={{ color: "var(--ink)" }}>Overseer:</strong> {row.overseer || "—"}</div>
+              <div><strong style={{ color: "var(--ink)" }}>Bethel Leader:</strong> {row.bethelLeader || "—"}</div>
+              <div><strong style={{ color: "var(--ink)" }}>Last Visit:</strong> — <span style={{ fontSize: "11px" }}>(not tracked yet)</span></div>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", gap: "4px", padding: "10px 20px 0", borderBottom: "1px solid var(--border)" }}>
+            {DRAWER_TABS.map((t) => (
+              <button key={t.id} onClick={() => setDrawerTab(t.id)} style={{
+                padding: "7px 12px", fontSize: "12px", fontWeight: 600, border: "none", borderBottom: `2px solid ${drawerTab === t.id ? "var(--plum)" : "transparent"}`,
+                background: "transparent", color: drawerTab === t.id ? "var(--plum)" : "var(--ink-muted)", cursor: "pointer",
+              }}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+
+          <div style={{ flex: 1, overflow: "auto", padding: "18px 20px" }}>
+            {drawerTab === "chain" && (
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)", marginBottom: "12px" }}>Supervision Chain</div>
+                <BlocChaine titre="Pastor" valeur={row.pastor} champ="pastor" options={[]} editable={false} />
+                <BlocChaine titre="Minister" valeur={row.minister} champ="minister" options={ministersList} editable={true} />
+                <BlocChaine titre="Overseer" valeur={row.overseer} champ="overseer" options={overseersList} editable={true} />
+              </div>
+            )}
+            {drawerTab === "spiritual" && (
+              <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
+                Spiritual roles tracking is not yet part of this data model.
+              </div>
+            )}
+            {drawerTab === "visits" && (
+              <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
+                No visit history has been recorded for this Bethel yet.
+              </div>
+            )}
+            {drawerTab === "notes" && (
+              <div style={{ color: "var(--ink-muted)", fontSize: "13px", textAlign: "center", padding: "30px 10px" }}>
+                Notes are not yet supported for Bethels.
+              </div>
+            )}
+          </div>
+        </div>
+      </>
     );
   }
 
@@ -3792,7 +3969,12 @@ function BethelSupervisionReport() {
                   </thead>
                   <tbody>
                     {rs.map((r) => (
-                      <tr key={r.bethelId}>
+                      <tr
+                        key={r.bethelId}
+                        className="bsr-clickable-row"
+                        onClick={() => setDrawerBethelId(r.bethelId)}
+                        style={{ cursor: "pointer" }}
+                      >
                         <td style={tdStyle}>{r.minister || "—"}</td>
                         <td style={tdStyle}>{r.overseer || "—"}</td>
                         <td style={tdStyle}>{r.bethelLeader || "—"}</td>
@@ -3950,6 +4132,19 @@ function BethelSupervisionReport() {
             </tbody>
           </table>
         </div>
+      )}
+
+      <style>{`
+        .bsr-clickable-row:hover td {
+          background: var(--bg) !important;
+        }
+      `}</style>
+
+      {drawerBethelId && (
+        <BethelDrawer
+          row={rows.find((r) => r.bethelId === drawerBethelId) || null}
+          onClose={() => setDrawerBethelId(null)}
+        />
       )}
     </div>
   );
