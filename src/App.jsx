@@ -3552,6 +3552,419 @@ function MemberZoneMismatchReport({ zones }) {
     </div>
   );
 }
+// Pas encore de colonne "pastor" dans le schéma -- un seul campus/pasteur existe
+// aujourd'hui, donc on le fixe ici. Le jour où members.pastor_name (ou une table
+// pastors) existe, remplacer cette constante par une vraie valeur lue en base.
+const CAMPUS_PASTOR = "Stanley St-Georges";
+
+function estValeurVide(v) {
+  return !v || !String(v).trim() || String(v).trim().toUpperCase() === "UNASSIGNED";
+}
+
+function BethelSupervisionReport() {
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
+  const [rows, setRows] = useState([]);
+  const [subTab, setSubTab] = useState("bypastor");
+
+  useEffect(() => {
+    (async () => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const [bethelsData, membersData, zonesData] = await Promise.all([
+          supaGetTout("bethels", "status=eq.active&select=bethel_id,hp_number,church_id,bethel_name_officiel,leader_name,zone_id"),
+          supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,bethel_id,overseer_name,ordained_minister_name,bethel_leader_name"),
+          supaGetTout("data_zones", "is_active=eq.true&select=zone_id,zone_code,zone_name"),
+        ]);
+
+        const zoneById = Object.fromEntries(zonesData.map((z) => [z.zone_id, z]));
+        const membresParBethel = {};
+        membersData.forEach((m) => {
+          if (!m.bethel_id) return;
+          (membresParBethel[m.bethel_id] = membresParBethel[m.bethel_id] || []).push(m);
+        });
+
+        const construites = bethelsData.map((b) => {
+          const equipe = membresParBethel[b.bethel_id] || [];
+          const leaderMembre = equipe.find((m) => m.role === "Bethel Leader") || null;
+          // Pas de "Bethel Leader" formel ? On prend n'importe quel membre de ce Bethel
+          // pour récupérer la chaîne minister/overseer déjà renseignée sur sa fiche --
+          // c'est la même donnée dénormalisée partout dans ce Bethel (voir synchro Shekinah).
+          const reference = leaderMembre || equipe[0] || null;
+
+          const minister = reference?.ordained_minister_name || "";
+          const overseer = reference?.overseer_name || "";
+          const bethelLeader = leaderMembre
+            ? `${leaderMembre.first_name} ${leaderMembre.last_name}`
+            : (b.leader_name || "");
+
+          const zone = zoneById[b.zone_id];
+          const missingMinister = estValeurVide(minister);
+          const missingOverseer = estValeurVide(overseer);
+          const missingLeader = estValeurVide(bethelLeader);
+
+          return {
+            bethelId: b.bethel_id,
+            pastor: CAMPUS_PASTOR,
+            minister, overseer, bethelLeader,
+            churchId: b.church_id || "",
+            bethelName: b.bethel_name_officiel || b.hp_number,
+            zone: zone?.zone_code || zone?.zone_name || "—",
+            hasAnyMember: equipe.length > 0,
+            missingMinister, missingOverseer, missingLeader,
+            chainComplete: !missingMinister && !missingOverseer && !missingLeader,
+          };
+        });
+
+        setRows(construites);
+      } catch (e) {
+        setLoadError(e.message);
+        setRows([]);
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, []);
+
+  // --- Agrégations partagées entre les 5 sous-onglets ---
+
+  const parPasteur = useMemo(() => {
+    const groupes = {};
+    rows.forEach((r) => {
+      if (!groupes[r.pastor]) groupes[r.pastor] = [];
+      groupes[r.pastor].push(r);
+    });
+    return groupes;
+  }, [rows]);
+
+  const resumeParPasteur = useMemo(() => {
+    return Object.entries(parPasteur).map(([pastor, rs]) => {
+      const ministers = new Set(rs.map((r) => r.minister).filter((v) => !estValeurVide(v)));
+      const overseers = new Set(rs.map((r) => r.overseer).filter((v) => !estValeurVide(v)));
+      const incomplete = rs.filter((r) => !r.chainComplete).length;
+      const priority = incomplete > 5 ? "High" : incomplete > 0 ? "Medium" : "Low";
+      return { pastor, ministers: ministers.size, overseers: overseers.size, bethels: rs.length, incomplete, priority };
+    });
+  }, [parPasteur]);
+
+  const parMinistre = useMemo(() => {
+    const groupes = {};
+    rows.forEach((r) => {
+      const cle = `${r.pastor}||${r.minister || "(unassigned)"}`;
+      if (!groupes[cle]) groupes[cle] = { pastor: r.pastor, minister: r.minister || "Unassigned", rows: [] };
+      groupes[cle].rows.push(r);
+    });
+    return Object.values(groupes).map((g) => {
+      const overseers = new Set(g.rows.map((r) => r.overseer).filter((v) => !estValeurVide(v)));
+      const missingOverseer = g.rows.filter((r) => r.missingOverseer).length;
+      const missingLeader = g.rows.filter((r) => r.missingLeader).length;
+      return {
+        pastor: g.pastor, minister: g.minister,
+        overseers: overseers.size, bethels: g.rows.length,
+        missingOverseer, missingLeader,
+        needsReview: missingOverseer > 0 || missingLeader > 0,
+      };
+    });
+  }, [rows]);
+
+  function actionRequise(missingPastor, missingMinister, missingOverseer, missingLeader) {
+    const actions = [];
+    if (missingPastor) actions.push("Assign Pastor");
+    if (missingMinister) actions.push("Assign Minister");
+    if (missingOverseer) actions.push("Assign Overseer");
+    if (missingLeader) actions.push("Assign Bethel Leader");
+    return actions.join("; ") || "—";
+  }
+
+  const incompletes = useMemo(() => rows.filter((r) => !r.chainComplete), [rows]);
+
+  const qualiteDonnees = useMemo(() => {
+    const missingMinisterCount = rows.filter((r) => r.missingMinister).length;
+    const missingOverseerCount = rows.filter((r) => r.missingOverseer).length;
+    const missingLeaderCount = rows.filter((r) => r.missingLeader).length;
+    const noRecordCount = rows.filter((r) => !r.hasAnyMember).length;
+    return { missingMinisterCount, missingOverseerCount, missingLeaderCount, noRecordCount };
+  }, [rows]);
+
+  // --- Petits composants d'affichage réutilisés dans les 5 sous-onglets ---
+
+  function PilleHealth({ complete }) {
+    return (
+      <span style={{
+        fontSize: "11px", fontWeight: 600, padding: "3px 10px", borderRadius: "999px",
+        background: complete ? "rgba(31,92,78,0.10)" : "rgba(162,59,51,0.10)",
+        color: complete ? "var(--teal)" : "var(--brick)",
+      }}>
+        {complete ? "Complete" : "Need Review"}
+      </span>
+    );
+  }
+
+  function PilleChain({ r }) {
+    const etapes = [
+      { ok: !r.missingMinister, label: "M" },
+      { ok: !r.missingOverseer, label: "O" },
+      { ok: !r.missingLeader, label: "L" },
+    ];
+    return (
+      <span style={{ display: "inline-flex", gap: "3px" }}>
+        {etapes.map((e, i) => (
+          <span key={i} title={e.label} style={{
+            width: "18px", height: "18px", borderRadius: "5px", fontSize: "10px", fontWeight: 700,
+            display: "inline-flex", alignItems: "center", justifyContent: "center",
+            background: e.ok ? "rgba(31,92,78,0.12)" : "rgba(162,59,51,0.12)",
+            color: e.ok ? "var(--teal)" : "var(--brick)",
+          }}>{e.label}</span>
+        ))}
+      </span>
+    );
+  }
+
+  function PilleReview({ needsReview }) {
+    return (
+      <span style={{
+        fontSize: "11px", fontWeight: 600, padding: "3px 10px", borderRadius: "999px",
+        background: needsReview ? "rgba(184,134,59,0.12)" : "rgba(31,92,78,0.10)",
+        color: needsReview ? "var(--gold)" : "var(--teal)",
+      }}>
+        {needsReview ? "Needs Review" : "OK"}
+      </span>
+    );
+  }
+
+  const SOUS_ONGLETS = [
+    { id: "bypastor", label: "By Pastor" },
+    { id: "summary", label: "Summary" },
+    { id: "leadership", label: "Leadership" },
+    { id: "actionview", label: "Action View" },
+    { id: "dataquality", label: "Data Quality" },
+  ];
+
+  const thStyle = { padding: "8px 10px", textAlign: "left", fontSize: "10.5px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid var(--border)" };
+  const tdStyle = { padding: "9px 10px", fontSize: "12.5px", color: "var(--ink)", borderBottom: "1px solid var(--border)" };
+
+  if (loading) {
+    return <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading supervision chain…</div>;
+  }
+  if (loadError) {
+    return <div style={{ fontSize: "13px", color: "var(--brick)" }}>Error: {loadError}</div>;
+  }
+
+  return (
+    <div>
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "0 0 4px" }}>Bethel Supervision</h2>
+      <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 16px" }}>
+        Supervision chain: Pastor → Minister → Overseer → Bethel Leader → Bethel · TG Montreal
+      </p>
+
+      <div style={{ display: "flex", gap: "6px", marginBottom: "18px", flexWrap: "wrap" }}>
+        {SOUS_ONGLETS.map((t) => (
+          <button key={t.id} onClick={() => setSubTab(t.id)} style={{
+            padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
+            border: `1px solid ${subTab === t.id ? "var(--plum)" : "var(--border)"}`,
+            background: subTab === t.id ? "var(--plum)" : "var(--surface)",
+            color: subTab === t.id ? "#fff" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {subTab === "bypastor" && (
+        <div>
+          <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginBottom: "20px" }}>
+            <StatCard label="Pastor Groups" value={Object.keys(parPasteur).length} />
+            <StatCard label="Ministers" value={new Set(rows.map((r) => r.minister).filter((v) => !estValeurVide(v))).size} accent="var(--plum)" />
+            <StatCard label="Overseers" value={new Set(rows.map((r) => r.overseer).filter((v) => !estValeurVide(v))).size} accent="var(--teal)" />
+            <StatCard label="Bethels" value={rows.length} />
+            <StatCard label="Need Review" value={incompletes.length} accent={incompletes.length ? "var(--brick)" : "var(--teal)"} />
+          </div>
+
+          {Object.entries(parPasteur).map(([pastor, rs]) => (
+            <div key={pastor} style={{ marginBottom: "22px" }}>
+              <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--plum)", marginBottom: "8px" }}>
+                Pastor {pastor}
+              </div>
+              <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+                <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                  <thead>
+                    <tr style={{ background: "var(--bg)" }}>
+                      <th style={thStyle}>Minister</th>
+                      <th style={thStyle}>Overseer</th>
+                      <th style={thStyle}>Bethel Leader</th>
+                      <th style={thStyle}>Church ID</th>
+                      <th style={thStyle}>Bethel Name</th>
+                      <th style={thStyle}>Zone</th>
+                      <th style={thStyle}>Chain</th>
+                      <th style={thStyle}>Health</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rs.map((r) => (
+                      <tr key={r.bethelId}>
+                        <td style={tdStyle}>{r.minister || "—"}</td>
+                        <td style={tdStyle}>{r.overseer || "—"}</td>
+                        <td style={tdStyle}>{r.bethelLeader || "—"}</td>
+                        <td style={{ ...tdStyle, fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--ink-muted)" }}>{r.churchId || "—"}</td>
+                        <td style={tdStyle}>{r.bethelName}</td>
+                        <td style={tdStyle}>{r.zone}</td>
+                        <td style={tdStyle}><PilleChain r={r} /></td>
+                        <td style={tdStyle}><PilleHealth complete={r.chainComplete} /></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {subTab === "summary" && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr style={{ background: "var(--bg)" }}>
+                <th style={thStyle}>Pastor</th>
+                <th style={thStyle}>Ministers</th>
+                <th style={thStyle}>Overseers</th>
+                <th style={thStyle}>Bethels</th>
+                <th style={thStyle}>Incomplete Chains</th>
+                <th style={thStyle}>Priority</th>
+              </tr>
+            </thead>
+            <tbody>
+              {resumeParPasteur.map((s) => (
+                <tr key={s.pastor}>
+                  <td style={tdStyle}>{s.pastor}</td>
+                  <td style={tdStyle}>{s.ministers}</td>
+                  <td style={tdStyle}>{s.overseers}</td>
+                  <td style={tdStyle}>{s.bethels}</td>
+                  <td style={tdStyle}>{s.incomplete}</td>
+                  <td style={tdStyle}>
+                    <span style={{
+                      fontSize: "11px", fontWeight: 600, padding: "3px 10px", borderRadius: "999px",
+                      background: s.priority === "High" ? "rgba(162,59,51,0.10)" : s.priority === "Medium" ? "rgba(184,134,59,0.12)" : "rgba(31,92,78,0.10)",
+                      color: s.priority === "High" ? "var(--brick)" : s.priority === "Medium" ? "var(--gold)" : "var(--teal)",
+                    }}>
+                      {s.priority}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {subTab === "leadership" && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr style={{ background: "var(--bg)" }}>
+                <th style={thStyle}>Pastor</th>
+                <th style={thStyle}>Minister</th>
+                <th style={thStyle}>Overseers</th>
+                <th style={thStyle}>Bethels</th>
+                <th style={thStyle}>Missing Overseer</th>
+                <th style={thStyle}>Missing Leader</th>
+                <th style={thStyle}>Review</th>
+              </tr>
+            </thead>
+            <tbody>
+              {parMinistre.map((g, i) => (
+                <tr key={i}>
+                  <td style={tdStyle}>{g.pastor}</td>
+                  <td style={tdStyle}>{g.minister}</td>
+                  <td style={tdStyle}>{g.overseers}</td>
+                  <td style={tdStyle}>{g.bethels}</td>
+                  <td style={tdStyle}>{g.missingOverseer}</td>
+                  <td style={tdStyle}>{g.missingLeader}</td>
+                  <td style={tdStyle}><PilleReview needsReview={g.needsReview} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {subTab === "actionview" && (
+        <div>
+          <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 14px" }}>
+            {incompletes.length} bethels with incomplete supervision chains. Use this view for assignment meetings.
+          </p>
+          {incompletes.length === 0 ? (
+            <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
+              Every supervision chain is complete. 🎉
+            </div>
+          ) : (
+            <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                <thead>
+                  <tr style={{ background: "var(--bg)" }}>
+                    <th style={thStyle}>Pastor</th>
+                    <th style={thStyle}>Minister</th>
+                    <th style={thStyle}>Overseer</th>
+                    <th style={thStyle}>Bethel Leader</th>
+                    <th style={thStyle}>Bethel</th>
+                    <th style={thStyle}>Action Required</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {incompletes.map((r) => (
+                    <tr key={r.bethelId}>
+                      <td style={tdStyle}>{r.pastor}</td>
+                      <td style={tdStyle}>{r.minister || "—"}</td>
+                      <td style={tdStyle}>{r.overseer || "—"}</td>
+                      <td style={tdStyle}>{r.bethelLeader || "—"}</td>
+                      <td style={tdStyle}>{r.bethelName}</td>
+                      <td style={{ ...tdStyle, color: "var(--brick)", fontWeight: 600 }}>
+                        {actionRequise(false, r.missingMinister, r.missingOverseer, r.missingLeader)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
+      {subTab === "dataquality" && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr style={{ background: "var(--bg)" }}>
+                <th style={thStyle}>Issue Type</th>
+                <th style={thStyle}>Current Value</th>
+                <th style={thStyle}>Observation</th>
+                <th style={thStyle}>Recommended Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>Missing assignments</td>
+                <td style={tdStyle}>
+                  0 Pastor / {qualiteDonnees.missingMinisterCount} Minister / {qualiteDonnees.missingOverseerCount} Overseer / {qualiteDonnees.missingLeaderCount} Bethel Leader non assignés
+                </td>
+                <td style={tdStyle}>Some records do not yet have a complete supervision chain.</td>
+                <td style={tdStyle}>Prioritize Overseer and Bethel Leader assignment, then complete upper-level gaps.</td>
+              </tr>
+              <tr>
+                <td style={{ ...tdStyle, fontWeight: 600 }}>Missing bethel record</td>
+                <td style={tdStyle}>{qualiteDonnees.noRecordCount} Bethels have no chain record</td>
+                <td style={tdStyle}>Some Bethels are not connected to any supervision chain.</td>
+                <td style={tdStyle}>Assign Pastor, Minister, and Overseer for each unlinked Bethel.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ReportsView({ submissions, bethels, zones, onChanged }) {
 
   
@@ -3573,11 +3986,11 @@ const [tab, setTab] = useState("hosting");
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Reports</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : tab === "zonemismatch" ? "Bethels whose zone doesn't match their address." : "Members whose own address doesn't match their Bethel's zone."}
+        {tab === "hosting" ? "Willing-to-host, broken down by leadership level." : tab === "gaps" ? "Members missing key information." : tab === "zonemismatch" ? "Bethels whose zone doesn't match their address." : tab === "bethelsupervision" ? "Full Pastor → Minister → Overseer → Bethel Leader → Bethel chain, by health status." : "Members whose own address doesn't match their Bethel's zone."}
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }, { id: "membermismatch", label: "Member Address Mismatches" }].map((t) => (
+        {[{ id: "hosting", label: "Willing to Host" }, { id: "gaps", label: "Data Gaps" }, { id: "zonemismatch", label: "Zone Mismatches" }, { id: "membermismatch", label: "Member Address Mismatches" }, { id: "bethelsupervision", label: "Bethel Supervision" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -3589,7 +4002,9 @@ const [tab, setTab] = useState("hosting");
         ))}
       </div>
 
-      {tab === "hosting" ? (
+      {tab === "bethelsupervision" ? (
+        <BethelSupervisionReport />
+      ) : tab === "hosting" ? (
         submissions.length === 0 ? (
           <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
             No submissions yet to report on.
