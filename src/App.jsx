@@ -73,6 +73,16 @@ async function supaPatch(table, query, body) {
   return res.json();
 }
 
+async function supaRpc(fn, body) {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${fn}`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) throw new Error(`RPC ${fn} failed: ${res.status} ${await res.text()}`);
+  return res.json();
+}
+
 async function supaDelete(table, query) {
   const res = await fetch(`${SUPABASE_URL}/rest/v1/${table}?${query}`, {
     method: "DELETE",
@@ -3557,6 +3567,8 @@ function BethelSupervisionReport() {
   const [rows, setRows] = useState([]);
   const [subTab, setSubTab] = useState("bypastor");
   const [drawerBethelId, setDrawerBethelId] = useState(null);
+  const [filtreType, setFiltreType] = useState("officiels"); // "officiels" | "anciens" | "tous"
+  const [membresAnciens, setMembresAnciens] = useState([]); // membres encore logés dans un ancien groupe (bassin HP)
   const [ministersList, setMinistersList] = useState([]);
   const [overseersList, setOverseersList] = useState([]);
 
@@ -3567,7 +3579,7 @@ function BethelSupervisionReport() {
       try {
         const [bethelsData, membersData, zonesData] = await Promise.all([
           supaGetTout("bethels", "status=eq.active&select=bethel_id,hp_number,church_id,bethel_name_officiel,leader_name,zone_id"),
-          supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,bethel_id,overseer_name,ordained_minister_name,bethel_leader_name"),
+          supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,bethel_id,overseer_name,ordained_minister_name,bethel_leader_name,postal_code,city,address"),
           supaGetTout("data_zones", "is_active=eq.true&select=zone_id,zone_code,zone_name"),
         ]);
 
@@ -3587,6 +3599,16 @@ function BethelSupervisionReport() {
         )).sort();
         setMinistersList(nomsMinistres);
         setOverseersList(nomsOverseers);
+
+        // Bethel "officiel" = nom officiel renseigné OU code déjà au format Bethel-Ville-000000.
+        // Tout le reste (BETHEL-MTL-.., BETHEL-LVL-.., BETHEL-RPT-.., FORM-..) = ancien groupe / bassin HP.
+        const estOfficiel = (b) => !!b.bethel_name_officiel || /^bethel-.+-\d{6}$/i.test(b.hp_number || "");
+        const anciensParId = Object.fromEntries(bethelsData.filter((b) => !estOfficiel(b)).map((b) => [b.bethel_id, b]));
+        setMembresAnciens(
+          membersData
+            .filter((m) => m.bethel_id && anciensParId[m.bethel_id])
+            .map((m) => ({ ...m, ancienCode: anciensParId[m.bethel_id].hp_number }))
+        );
 
         const construites = bethelsData.map((b) => {
           const equipe = membresParBethel[b.bethel_id] || [];
@@ -3614,6 +3636,8 @@ function BethelSupervisionReport() {
             churchId: b.church_id || "",
             bethelName: b.bethel_name_officiel || b.hp_number,
             zone: zone?.zone_code || zone?.zone_name || "—",
+            isOfficiel: estOfficiel(b),
+            zoneId: b.zone_id,
             hasAnyMember: equipe.length > 0,
             missingMinister, missingOverseer, missingLeader,
             chainComplete: !missingMinister && !missingOverseer && !missingLeader,
@@ -3632,14 +3656,21 @@ function BethelSupervisionReport() {
 
   // --- Agrégations partagées entre les 5 sous-onglets ---
 
+  const nbOfficiels = useMemo(() => rows.filter((r) => r.isOfficiel).length, [rows]);
+  const nbAnciens = rows.length - nbOfficiels;
+  const rowsVue = useMemo(
+    () => rows.filter((r) => filtreType === "tous" || (filtreType === "officiels" ? r.isOfficiel : !r.isOfficiel)),
+    [rows, filtreType]
+  );
+
   const parPasteur = useMemo(() => {
     const groupes = {};
-    rows.forEach((r) => {
+    rowsVue.forEach((r) => {
       if (!groupes[r.pastor]) groupes[r.pastor] = [];
       groupes[r.pastor].push(r);
     });
     return groupes;
-  }, [rows]);
+  }, [rowsVue]);
 
   const resumeParPasteur = useMemo(() => {
     return Object.entries(parPasteur).map(([pastor, rs]) => {
@@ -3653,7 +3684,7 @@ function BethelSupervisionReport() {
 
   const parMinistre = useMemo(() => {
     const groupes = {};
-    rows.forEach((r) => {
+    rowsVue.forEach((r) => {
       const cle = `${r.pastor}||${r.minister || "(unassigned)"}`;
       if (!groupes[cle]) groupes[cle] = { pastor: r.pastor, minister: r.minister || "Non assigné", rows: [] };
       groupes[cle].rows.push(r);
@@ -3669,7 +3700,7 @@ function BethelSupervisionReport() {
         needsReview: missingOverseer > 0 || missingLeader > 0,
       };
     });
-  }, [rows]);
+  }, [rowsVue]);
 
   function actionRequise(missingPastor, missingMinister, missingOverseer, missingLeader) {
     const actions = [];
@@ -3680,15 +3711,15 @@ function BethelSupervisionReport() {
     return actions.join("; ") || "—";
   }
 
-  const incompletes = useMemo(() => rows.filter((r) => !r.chainComplete), [rows]);
+  const incompletes = useMemo(() => rowsVue.filter((r) => !r.chainComplete), [rowsVue]);
 
   const qualiteDonnees = useMemo(() => {
-    const missingMinisterCount = rows.filter((r) => r.missingMinister).length;
-    const missingOverseerCount = rows.filter((r) => r.missingOverseer).length;
-    const missingLeaderCount = rows.filter((r) => r.missingLeader).length;
-    const noRecordCount = rows.filter((r) => !r.hasAnyMember).length;
+    const missingMinisterCount = rowsVue.filter((r) => r.missingMinister).length;
+    const missingOverseerCount = rowsVue.filter((r) => r.missingOverseer).length;
+    const missingLeaderCount = rowsVue.filter((r) => r.missingLeader).length;
+    const noRecordCount = rowsVue.filter((r) => !r.hasAnyMember).length;
     return { missingMinisterCount, missingOverseerCount, missingLeaderCount, noRecordCount };
-  }, [rows]);
+  }, [rowsVue]);
 
   // --- Édition en direct de la chaîne de supervision depuis le panneau latéral ---
   // Le nom est dénormalisé sur chaque fiche membre du Bethel : on met donc à jour
@@ -3771,8 +3802,39 @@ function BethelSupervisionReport() {
     const [notes, setNotes] = useState([]);
     const [nouvelleNoteOuverte, setNouvelleNoteOuverte] = useState(false);
     const [texteNote, setTexteNote] = useState("");
+    const [rechercheAncien, setRechercheAncien] = useState("");
+    const [transfertEnCours, setTransfertEnCours] = useState(null);
 
     if (!row) return null;
+
+    const resultatsAnciens = (() => {
+      const q = normaliseNom(rechercheAncien);
+      const qBrut = rechercheAncien.trim().toLowerCase().replace(/\s+/g, "");
+      if (q.length < 2 && qBrut.length < 3) return [];
+      return membresAnciens.filter((m) => {
+        const texte = normaliseNom(`${m.first_name} ${m.last_name} ${m.city || ""} ${m.address || ""}`);
+        const cp = (m.postal_code || "").toLowerCase().replace(/\s+/g, "");
+        return (q.length >= 2 && texte.includes(q)) || (qBrut.length >= 3 && cp.startsWith(qBrut));
+      }).slice(0, 30);
+    })();
+
+    // Extraction d'UN membre d'un ancien groupe vers ce Bethel officiel.
+    // L'ancien groupe n'est jamais modifié ni supprimé : seul ce membre change de bethel_id
+    // (la fonction fn_assign_member_to_bethel recopie aussi sa chaîne de supervision).
+    async function transfererMembre(m) {
+      const nom = `${m.first_name} ${m.last_name}`;
+      if (!window.confirm(`Transférer ${nom} de ${m.ancienCode} vers ${row.bethelName} ?`)) return;
+      setTransfertEnCours(m.member_id);
+      try {
+        await supaRpc("fn_assign_member_to_bethel", { p_member_id: m.member_id, p_bethel_id: row.bethelId });
+        setMembresAnciens((prev) => prev.filter((x) => x.member_id !== m.member_id));
+        setRows((prev) => prev.map((r) => (r.bethelId === row.bethelId ? { ...r, hasAnyMember: true } : r)));
+      } catch (e) {
+        alert("Transfert impossible : " + e.message);
+      } finally {
+        setTransfertEnCours(null);
+      }
+    }
 
     async function appliquer(champ, valeur) {
       setSaving(true);
@@ -3813,6 +3875,7 @@ function BethelSupervisionReport() {
       { id: "spiritual", label: "Rôles spirituels" },
       { id: "visits", label: "Historique des visites" },
       { id: "notes", label: "Notes" },
+      ...(row.isOfficiel ? [{ id: "extraction", label: "Extraction" }] : []),
     ];
 
     const ROLES_CHAINE = ["Pasteur", "Ministre", "Superviseur"];
@@ -4004,6 +4067,45 @@ function BethelSupervisionReport() {
               </div>
             )}
 
+            {drawerTab === "extraction" && (
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)", marginBottom: "4px" }}>Extraire un membre d'un ancien groupe</div>
+                <p style={{ fontSize: "11.5px", color: "var(--ink-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>
+                  Cherchez par nom, ville, adresse ou code postal parmi les membres encore logés dans un ancien groupe (BETHEL-MTL-…, FORM-…). Le transfert se fait un membre à la fois ; l'ancien groupe est conservé.
+                </p>
+                <input
+                  value={rechercheAncien}
+                  onChange={(e) => setRechercheAncien(e.target.value)}
+                  placeholder="Nom, ville ou code postal (ex: H1G)…"
+                  style={{ width: "100%", boxSizing: "border-box", padding: "7px 10px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px", marginBottom: "10px" }}
+                />
+                {resultatsAnciens.length === 0 ? (
+                  <div style={{ color: "var(--ink-muted)", fontSize: "12.5px", textAlign: "center", padding: "20px 10px", border: "1px dashed var(--border)", borderRadius: "8px" }}>
+                    {rechercheAncien.trim() ? "Aucun membre trouvé dans les anciens groupes." : `${membresAnciens.length} membres dans les anciens groupes — lancez une recherche.`}
+                  </div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                    {resultatsAnciens.map((m) => (
+                      <div key={m.member_id} style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 10px", display: "flex", justifyContent: "space-between", gap: "8px", alignItems: "center" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontSize: "12.5px", fontWeight: 600 }}>{m.first_name} {m.last_name}</div>
+                          <div style={{ fontSize: "11px", color: "var(--ink-muted)" }}>{[m.address, m.city, m.postal_code].filter(Boolean).join(" · ") || "Adresse non renseignée"}</div>
+                          <div style={{ fontSize: "10.5px", fontFamily: "var(--font-mono)", color: "var(--ink-muted)" }}>{m.ancienCode}</div>
+                        </div>
+                        <button
+                          onClick={() => transfererMembre(m)}
+                          disabled={transfertEnCours === m.member_id}
+                          style={{ padding: "5px 10px", borderRadius: "999px", border: "1px solid var(--plum)", background: "var(--plum)", color: "#fff", fontSize: "11px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap", opacity: transfertEnCours === m.member_id ? 0.5 : 1 }}
+                        >
+                          Transférer ici
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {drawerTab === "notes" && (
               <div>
                 <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: "12px" }}>
@@ -4067,6 +4169,28 @@ function BethelSupervisionReport() {
         Chaîne de supervision : Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel · TG Montréal
       </p>
 
+      <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap", alignItems: "center" }}>
+        {[
+          { id: "officiels", label: `Bethels officiels (${nbOfficiels})` },
+          { id: "anciens", label: `Anciens groupes / Bassin HP (${nbAnciens})` },
+          { id: "tous", label: `Tous (${rows.length})` },
+        ].map((f) => (
+          <button key={f.id} onClick={() => setFiltreType(f.id)} style={{
+            padding: "5px 12px", borderRadius: "8px", fontSize: "12px", fontWeight: 600,
+            border: `1px solid ${filtreType === f.id ? "var(--teal)" : "var(--border)"}`,
+            background: filtreType === f.id ? "rgba(31,92,78,0.10)" : "var(--surface)",
+            color: filtreType === f.id ? "var(--teal)" : "var(--ink-muted)", cursor: "pointer",
+          }}>
+            {f.label}
+          </button>
+        ))}
+      </div>
+      {filtreType === "anciens" && (
+        <p style={{ color: "var(--ink-muted)", fontSize: "12px", margin: "0 0 14px" }}>
+          Anciens groupes historiques (BETHEL-MTL-…, BETHEL-LVL-…, FORM-…) : ils sont conservés tels quels comme réservoir de membres et ne sont jamais supprimés. Les membres en sont extraits un par un depuis la fiche d'un Bethel officiel (onglet « Extraction »).
+        </p>
+      )}
+
       <div style={{ display: "flex", gap: "6px", marginBottom: "18px", flexWrap: "wrap" }}>
         {SOUS_ONGLETS.map((t) => (
           <button key={t.id} onClick={() => setSubTab(t.id)} style={{
@@ -4084,9 +4208,9 @@ function BethelSupervisionReport() {
         <div>
           <div style={{ display: "flex", gap: "14px", flexWrap: "wrap", marginBottom: "20px" }}>
             <StatCard label="Groupes pastoraux" value={Object.keys(parPasteur).length} />
-            <StatCard label="Ministres" value={new Set(rows.map((r) => r.minister).filter((v) => !estValeurVide(v))).size} accent="var(--plum)" />
-            <StatCard label="Superviseurs" value={new Set(rows.map((r) => r.overseer).filter((v) => !estValeurVide(v))).size} accent="var(--teal)" />
-            <StatCard label="Bethels" value={rows.length} />
+            <StatCard label="Ministres" value={new Set(rowsVue.map((r) => r.minister).filter((v) => !estValeurVide(v))).size} accent="var(--plum)" />
+            <StatCard label="Superviseurs" value={new Set(rowsVue.map((r) => r.overseer).filter((v) => !estValeurVide(v))).size} accent="var(--teal)" />
+            <StatCard label="Bethels" value={rowsVue.length} />
             <StatCard label="À réviser" value={incompletes.length} accent={incompletes.length ? "var(--brick)" : "var(--teal)"} />
           </div>
 
