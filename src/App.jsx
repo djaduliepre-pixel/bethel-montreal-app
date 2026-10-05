@@ -1971,7 +1971,7 @@ function AddMemberForm({ bethelId, onAdded }) {
 /* ------------------------------------------------------------------ */
 /* Fenêtre : détail d'un Bethel, avec ses membres                     */
 /* ------------------------------------------------------------------ */
-function FindNearbyMembersPanel({ bethel, onAssigned }) {
+function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [candidats, setCandidats] = useState([]);
@@ -2042,6 +2042,8 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
     }
   }
 
+  useEffect(() => { if (autoStart && bethel.address) lancerRecherche(); /* eslint-disable-next-line */ }, []);
+
   async function assigner(candidat) {
     const cleId = candidat.kind === "member" ? candidat.member_id : candidat.submission_id;
     setAssigningId(cleId);
@@ -2074,7 +2076,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
   if (!bethel.address) {
     return (
       <div style={{ fontSize: "12px", color: "var(--brick)", marginTop: "10px" }}>
-        ⚠️ Add an address to this Bethel before searching for nearby members.
+        ⚠️ Ajoutez une adresse à ce Bethel avant de chercher des membres à proximité.
       </div>
     );
   }
@@ -2087,18 +2089,18 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
           border: "1px solid var(--plum)", background: "transparent", color: "var(--plum)", fontSize: "13px",
           fontWeight: 600, cursor: "pointer",
         }}>
-          <Search size={14} /> Find Nearby Members
+          <Search size={14} /> Trouver à proximité
         </button>
       ) : (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "16px", background: "var(--bg)" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Nearby candidates (pending + misplaced members)</span>
+            <span style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>Candidats à proximité (en attente + membres mal placés)</span>
             <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
           </div>
           {loading ? (
-            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Checking travel times for all pending submissions…</div>
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Calcul des temps de trajet…</div>
           ) : candidats.length === 0 ? (
-            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>No pending submissions or misplaced members with a usable address found.</div>
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Aucune soumission en attente ni membre mal placé avec une adresse exploitable.</div>
           ) : (
             <>
               {(() => {
@@ -2130,7 +2132,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
                       display: "inline-block", marginTop: "3px", fontSize: "10.5px", fontWeight: 600,
                       padding: "2px 7px", borderRadius: "999px", background: "rgba(31,92,78,0.10)", color: "var(--teal)",
                     }}>
-                      ✅ Already a member — {c.zoneActuelle || "another zone"}
+                      ✅ Déjà membre — {c.zoneActuelle || "autre zone"}
                     </div>
                   )}
                 </div>
@@ -2154,7 +2156,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned }) {
                       color: "#fff", fontSize: "11.5px", fontWeight: 600, cursor: "pointer",
                     }}
                   >
-                    {assigningId === cleId ? "…" : c.kind === "member" ? "Move here" : "Assign"}
+                    {assigningId === cleId ? "…" : c.kind === "member" ? "Déplacer ici" : "Assigner"}
                   </button>
                 </div>
               </div>
@@ -2940,31 +2942,217 @@ function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }
   );
 }
 
-function BethelsView({ bethels, memberCounts, onOpenDetail }) {
+/* ------------------------------------------------------------------ */
+/* Page « Bethels » -- reproduit l'interface du portail Shekinah       */
+/* (/campus-admin/bethels). Ne modifie JAMAIS bethel_id ni hp_number ; */
+/* « Désactiver » ne change que le champ status (aucune suppression).  */
+/* ------------------------------------------------------------------ */
+const estBethelOfficielLigne = (b) => !!b.bethel_name_officiel || /^bethel-.+-\d{6}$/i.test(b.hp_number || "");
+
+function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetail }) {
+  const [membres, setMembres] = useState([]);
+  const [chargement, setChargement] = useState(false);
+  const [recherche, setRecherche] = useState("");
+  const [pool, setPool] = useState([]);
+  const [envoiId, setEnvoiId] = useState(null);
+
+  const titres = {
+    voir: "Détails du Bethel",
+    ajouter: "Ajouter un membre",
+    assigner: "Assigner des membres",
+    proximite: "Trouver à proximité",
+  };
+
+  async function chargerMembres() {
+    setChargement(true);
+    try {
+      const data = await supaGet("members", `bethel_id=eq.${bethel.bethel_id}&select=member_id,first_name,last_name,phone,email,role,postal_code,status&order=last_name.asc`);
+      setMembres(data);
+    } catch (e) { setMembres([]); } finally { setChargement(false); }
+  }
+
+  async function chargerPool() {
+    setChargement(true);
+    try {
+      const idsAnciens = new Set(bethels.filter((b) => !estBethelOfficielLigne(b)).map((b) => b.bethel_id));
+      const [mem, soum] = await Promise.all([
+        supaGetTout("members", "select=member_id,first_name,last_name,phone,address,postal_code,city,bethel_id"),
+        supaGet("submissions", "status=eq.pending&select=submission_id,first_name,last_name,phone,address,postal_code,leadership_level"),
+      ]);
+      const codeParId = Object.fromEntries(bethels.map((b) => [b.bethel_id, b.hp_number]));
+      setPool([
+        ...mem.filter((m) => idsAnciens.has(m.bethel_id)).map((m) => ({ ...m, kind: "member", origine: codeParId[m.bethel_id] || "ancien groupe" })),
+        ...soum.map((s) => ({ ...s, kind: "pending", origine: "HP churches (réponses)" })),
+      ]);
+    } catch (e) { setPool([]); } finally { setChargement(false); }
+  }
+
+  useEffect(() => {
+    if (mode === "voir") chargerMembres();
+    if (mode === "assigner") chargerPool();
+    // eslint-disable-next-line
+  }, [mode, bethel.bethel_id]);
+
+  async function assigner(c) {
+    const cle = c.kind === "member" ? c.member_id : c.submission_id;
+    setEnvoiId(cle);
+    try {
+      if (c.kind === "member") {
+        // Un seul membre à la fois, via la fonction SQL (hérite de la chaîne de supervision du Bethel).
+        await supaRpc("fn_assign_member_to_bethel", { p_member_id: c.member_id, p_bethel_id: bethel.bethel_id });
+      } else {
+        await supaPost("members", {
+          bethel_id: bethel.bethel_id, first_name: c.first_name, last_name: c.last_name, phone: c.phone,
+          address: c.address, postal_code: c.postal_code,
+          role: LEADERSHIP_LABELS[c.leadership_level] || "Membre", willing_to_host: false, status: "active",
+        });
+        await supaPatch("submissions", `submission_id=eq.${c.submission_id}`, {
+          status: "approved", zone_id: bethel.zone_id, reviewed_at: new Date().toISOString(),
+        });
+      }
+      setPool((p) => p.filter((x) => (x.kind === "member" ? x.member_id : x.submission_id) !== cle));
+      onReload();
+    } catch (e) {
+      alert("Erreur : " + e.message + (c.kind === "member" ? "\n\n(Le Bethel cible doit avoir un Bethel Leader actif enregistré.)" : ""));
+    } finally { setEnvoiId(null); }
+  }
+
+  const q = normaliseNom(recherche);
+  const poolFiltre = pool
+    .filter((c) => !q || normaliseNom(`${c.first_name} ${c.last_name} ${c.postal_code || ""} ${c.city || ""}`).includes(q))
+    .slice(0, 60);
+
+  const ligne = (label, val) => (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: "12px", padding: "6px 0", borderBottom: "1px solid var(--border)", fontSize: "13px" }}>
+      <span style={{ color: "var(--ink-muted)" }}>{label}</span>
+      <span style={{ color: "var(--ink)", fontWeight: 600, textAlign: "right" }}>{val || "—"}</span>
+    </div>
+  );
+
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", zIndex: 60 }} />
+      <aside style={{
+        position: "fixed", top: 0, right: 0, bottom: 0, width: "min(480px, 100vw)", background: "var(--surface)",
+        zIndex: 61, boxShadow: "-8px 0 24px rgba(0,0,0,0.15)", overflowY: "auto", padding: "20px",
+      }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "14px" }}>
+          <div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>{titres[mode]}</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: "20px", color: "var(--ink)" }}>{bethel.bethel_name_officiel || bethel.hp_number}</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink-muted)" }}>{bethel.church_id || bethel.hp_number}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={18} /></button>
+        </div>
+
+        {mode === "voir" && (
+          <>
+            {ligne("Code Bethel (Church ID)", bethel.church_id || bethel.hp_number)}
+            {ligne("Ancien code (hp_number)", bethel.hp_number)}
+            {ligne("Responsable", bethel.leader_full_name || bethel.leader_name)}
+            {ligne("Courriel", bethel.leader_email)}
+            {ligne("Zone", bethel.zone_name)}
+            {ligne("Adresse", bethel.address)}
+            {ligne("Statut", bethel.status === "inactive" ? "Inactif" : "Actif")}
+            <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", margin: "16px 0 6px" }}>
+              Membres ({membres.length})
+            </div>
+            {chargement ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Chargement…</div>
+              : membres.length === 0 ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Aucun membre pour l'instant.</div>
+              : membres.map((m) => (
+                <div key={m.member_id} style={{ padding: "7px 0", borderBottom: "1px solid var(--border)" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{m.first_name} {m.last_name}</div>
+                  <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[m.role, m.phone, m.postal_code].filter(Boolean).join(" · ")}</div>
+                </div>
+              ))}
+            <button onClick={() => { onClose(); onOpenDetail(bethel); }} style={{
+              marginTop: "16px", padding: "8px 14px", borderRadius: "8px", border: "1px solid var(--plum)",
+              background: "transparent", color: "var(--plum)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+            }}>
+              Ouvrir la fiche complète
+            </button>
+          </>
+        )}
+
+        {mode === "ajouter" && <AddMemberForm bethelId={bethel.bethel_id} onAdded={() => { onReload(); onClose(); }} />}
+
+        {mode === "proximite" && (
+          <>
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "6px" }}>
+              Personnes en attente et membres mal placés, triés par temps de route vers ce Bethel (règle des {LIMITE_MINUTES_PROXIMITE} minutes).
+            </div>
+            <FindNearbyMembersPanel bethel={bethel} onAssigned={onReload} autoStart />
+          </>
+        )}
+
+        {mode === "assigner" && (
+          <>
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "10px", lineHeight: 1.5 }}>
+              Bassin des anciens groupes (BETHEL-MTL-…, LVL, RPT…) et soumissions « HP churches » en attente. Les membres sont transférés <b>un par un</b> ;
+              les anciens groupes ne sont jamais vidés ni supprimés.
+            </div>
+            <input value={recherche} onChange={(e) => setRecherche(e.target.value)} placeholder="Rechercher par nom, code postal ou ville…"
+              style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13px", marginBottom: "10px" }} />
+            {chargement ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Chargement du bassin…</div>
+              : poolFiltre.length === 0 ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Aucun résultat.</div>
+              : poolFiltre.map((c) => {
+                const cle = c.kind === "member" ? c.member_id : c.submission_id;
+                return (
+                  <div key={cle} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", padding: "8px 0", borderBottom: "1px solid var(--border)" }}>
+                    <div>
+                      <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{c.first_name} {c.last_name}</div>
+                      <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[c.postal_code, c.city, c.address].filter(Boolean).join(" · ") || "Adresse inconnue"}</div>
+                      <div style={{ fontSize: "10.5px", color: "var(--gold)", fontFamily: "var(--font-mono)" }}>{c.origine}</div>
+                    </div>
+                    <button disabled={envoiId === cle} onClick={() => {
+                      if (window.confirm(`Assigner ${c.first_name} ${c.last_name} à ${bethel.bethel_name_officiel || bethel.hp_number} ?`)) assigner(c);
+                    }} style={{ padding: "5px 12px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "11.5px", fontWeight: 600, cursor: "pointer", flexShrink: 0 }}>
+                      {envoiId === cle ? "…" : "Assigner"}
+                    </button>
+                  </div>
+                );
+              })}
+            {pool.length > poolFiltre.length && (
+              <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "8px" }}>
+                {poolFiltre.length} affichés sur {pool.length} — affinez la recherche.
+              </div>
+            )}
+          </>
+        )}
+      </aside>
+    </>
+  );
+}
+
+function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState("all");
   const [villeChoisie, setVilleChoisie] = useState("all");
   const [sousZoneChoisie, setSousZoneChoisie] = useState("all");
+  const [panneau, setPanneau] = useState(null); // { mode, bethelId }
+  const [enCours, setEnCours] = useState(null);
+
+  // « En attente d'assignation » = Bethel actif sans responsable enregistré (aucun Bethel Leader).
+  const sansResponsable = (b) => b.status !== "inactive" && !b.has_leader_member && (!b.leader_name || /^unassigned$/i.test(b.leader_name.trim()));
+  const codeAffiche = (b) => b.church_id || b.hp_number;
 
   const filtres = [
-    { id: "all", label: "All" },
-    { id: "needs_members", label: "Needs Members" },
-    { id: "active", label: "Active" },
-    { id: "inactive", label: "Inactive" },
-    { id: "willing_yes", label: "Willing: Yes" },
-    { id: "willing_no", label: "Willing: No" },
+    { id: "all", label: "Tous" },
+    { id: "pending", label: "En attente d'assignation" },
+    { id: "active", label: "Actif" },
+    { id: "inactive", label: "Inactif" },
+    { id: "needs_members", label: "Besoin de membres" },
   ];
 
   const villes = useMemo(() => {
     const compteurs = {};
     bethels.forEach((b) => {
-      const v = b.city_name || b.zone_name || "Unknown";
+      const v = b.city_name || b.zone_name || "Inconnu";
       compteurs[v] = (compteurs[v] || 0) + 1;
     });
-    return Object.entries(compteurs).sort((a, b) => b[1] - a[1]); // triées par nombre décroissant
+    return Object.entries(compteurs).sort((a, b) => b[1] - a[1]);
   }, [bethels]);
 
-  // Sous-zones précises (ex: "Laval Chomedey", "Laval Vimont") disponibles UNE FOIS qu'une ville est choisie
   const sousZones = useMemo(() => {
     if (villeChoisie === "all") return [];
     const compteurs = {};
@@ -2972,187 +3160,165 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
       .filter((b) => (b.city_name || b.zone_name) === villeChoisie)
       .forEach((b) => { compteurs[b.zone_name] = (compteurs[b.zone_name] || 0) + 1; });
     const entries = Object.entries(compteurs);
-    return entries.length > 1 ? entries.sort((a, b) => b[1] - a[1]) : []; // pas utile si une seule sous-zone
+    return entries.length > 1 ? entries.sort((a, b) => b[1] - a[1]) : [];
   }, [bethels, villeChoisie]);
 
   const resultats = useMemo(() => {
     let liste = bethels;
-    if (filtre === "needs_members") liste = liste.filter((b) => (memberCounts[b.bethel_id] || 0) === 0);
+    if (filtre === "pending") liste = liste.filter(sansResponsable);
     if (filtre === "active") liste = liste.filter((b) => b.status !== "inactive");
     if (filtre === "inactive") liste = liste.filter((b) => b.status === "inactive");
-    if (filtre === "willing_yes") liste = liste.filter((b) => b.leader_willing_to_host === true);
-    if (filtre === "willing_no") liste = liste.filter((b) => b.leader_willing_to_host === false);
+    if (filtre === "needs_members") liste = liste.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3);
     if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
     if (sousZoneChoisie !== "all") liste = liste.filter((b) => b.zone_name === sousZoneChoisie);
-
-    const q = recherche.trim().toLowerCase();
-    if (q.length >= 1) {
+    const q = normaliseNom(recherche);
+    if (q) {
       liste = liste.filter((b) =>
-        (b.leader_name || "").toLowerCase().includes(q) || (b.hp_number || "").toLowerCase().includes(q)
+        normaliseNom([b.leader_name, b.leader_full_name, b.hp_number, b.church_id, b.bethel_name_officiel].filter(Boolean).join(" ")).includes(q)
       );
     }
     return liste;
   }, [bethels, memberCounts, filtre, recherche, villeChoisie, sousZoneChoisie]);
 
+  const compteFiltre = (id) => {
+    if (id === "all") return bethels.length;
+    if (id === "pending") return bethels.filter(sansResponsable).length;
+    if (id === "active") return bethels.filter((b) => b.status !== "inactive").length;
+    if (id === "inactive") return bethels.filter((b) => b.status === "inactive").length;
+    return bethels.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3).length;
+  };
+
+  async function basculerStatut(b) {
+    const desactiver = b.status !== "inactive";
+    const msg = desactiver
+      ? `Désactiver le Bethel ${codeAffiche(b)} ?\n\nIl ne sera pas supprimé : seul son statut passera à « Inactif » (réversible).`
+      : `Réactiver le Bethel ${codeAffiche(b)} ?`;
+    if (!window.confirm(msg)) return;
+    setEnCours(b.bethel_id);
+    try {
+      await supaPatch("bethels", `bethel_id=eq.${b.bethel_id}`, { status: desactiver ? "inactive" : "active" });
+      onReload();
+    } catch (e) { alert("Erreur : " + e.message); } finally { setEnCours(null); }
+  }
+
+  const pilleStyle = (actif, couleur = "var(--plum)") => ({
+    padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600, cursor: "pointer",
+    border: `1px solid ${actif ? couleur : "var(--border)"}`,
+    background: actif ? couleur : "var(--surface)", color: actif ? "#fff" : "var(--ink-muted)",
+  });
+  const thStyle = (align = "left") => ({ textAlign: align, padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" });
+  const btnAction = (couleur, plein = false) => ({
+    padding: "5px 10px", borderRadius: "6px", fontSize: "11.5px", fontWeight: 600, cursor: "pointer", whiteSpace: "nowrap",
+    border: `1px solid ${couleur}`, background: plein ? couleur : "transparent", color: plein ? "#fff" : couleur,
+  });
+
+  const bethelPanneau = panneau ? bethels.find((b) => b.bethel_id === panneau.bethelId) : null;
+
   return (
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Bethels</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        Campus: TG Montreal — {bethels.length} total.
+        Campus: TG Montreal — {bethels.length} au total.
       </p>
 
-      <div style={{ position: "relative", maxWidth: "360px", marginBottom: "14px" }}>
+      <div style={{ position: "relative", maxWidth: "400px", marginBottom: "14px" }}>
         <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
         <input
           value={recherche}
           onChange={(e) => setRecherche(e.target.value)}
-          placeholder="Search by name or church ID…"
-          style={{
-            width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px",
-            border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none",
-          }}
+          placeholder="Rechercher par nom ou Church ID..."
+          style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none" }}
         />
       </div>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" }}>
         {filtres.map((f) => (
-          <button key={f.id} onClick={() => setFiltre(f.id)} style={{
-            padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600,
-            border: `1px solid ${filtre === f.id ? "var(--plum)" : "var(--border)"}`,
-            background: filtre === f.id ? "var(--plum)" : "var(--surface)",
-            color: filtre === f.id ? "#fff" : "var(--ink-muted)", cursor: "pointer",
-          }}>
-            {f.label}
+          <button key={f.id} onClick={() => setFiltre(f.id)} style={pilleStyle(filtre === f.id)}>
+            {f.label} ({compteFiltre(f.id)})
           </button>
         ))}
       </div>
 
       <div style={{ marginBottom: "16px" }}>
         <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
-          Browse by city
+          Parcourir par ville
         </div>
         <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-          <button onClick={() => { setVilleChoisie("all"); setSousZoneChoisie("all"); }} style={{
-            padding: "5px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
-            border: `1px solid ${villeChoisie === "all" ? "var(--teal)" : "var(--border)"}`,
-            background: villeChoisie === "all" ? "rgba(31,92,78,0.10)" : "var(--surface)",
-            color: villeChoisie === "all" ? "var(--teal)" : "var(--ink-muted)", cursor: "pointer",
-          }}>
-            All cities
+          <button onClick={() => { setVilleChoisie("all"); setSousZoneChoisie("all"); }} style={{ ...pilleStyle(villeChoisie === "all", "var(--teal)"), padding: "5px 12px", fontSize: "12px" }}>
+            Toutes les villes
           </button>
           {villes.map(([ville, count]) => (
-            <button key={ville} onClick={() => { setVilleChoisie(ville); setSousZoneChoisie("all"); }} style={{
-              padding: "5px 12px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
-              border: `1px solid ${villeChoisie === ville ? "var(--teal)" : "var(--border)"}`,
-              background: villeChoisie === ville ? "rgba(31,92,78,0.10)" : "var(--surface)",
-              color: villeChoisie === ville ? "var(--teal)" : "var(--ink-muted)", cursor: "pointer",
-            }}>
+            <button key={ville} onClick={() => { setVilleChoisie(ville); setSousZoneChoisie("all"); }} style={{ ...pilleStyle(villeChoisie === ville, "var(--teal)"), padding: "5px 12px", fontSize: "12px" }}>
               {ville} ({count})
             </button>
           ))}
         </div>
-
         {sousZones.length > 0 && (
-          <div style={{ marginTop: "10px" }}>
-            <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
-              Narrow by neighborhood
-            </div>
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
-              <button onClick={() => setSousZoneChoisie("all")} style={{
-                padding: "4px 10px", borderRadius: "999px", fontSize: "11.5px", fontWeight: 600,
-                border: `1px solid ${sousZoneChoisie === "all" ? "var(--gold)" : "var(--border)"}`,
-                background: sousZoneChoisie === "all" ? "rgba(184,134,59,0.10)" : "var(--surface)",
-                color: sousZoneChoisie === "all" ? "var(--gold)" : "var(--ink-muted)", cursor: "pointer",
-              }}>
-                All neighborhoods
+          <div style={{ marginTop: "10px", display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <button onClick={() => setSousZoneChoisie("all")} style={{ ...pilleStyle(sousZoneChoisie === "all", "var(--gold)"), padding: "4px 10px", fontSize: "11.5px" }}>Tous les quartiers</button>
+            {sousZones.map(([sz, count]) => (
+              <button key={sz} onClick={() => setSousZoneChoisie(sz)} style={{ ...pilleStyle(sousZoneChoisie === sz, "var(--gold)"), padding: "4px 10px", fontSize: "11.5px" }}>
+                {sz.replace(villeChoisie, "").trim() || sz} ({count})
               </button>
-              {sousZones.map(([sz, count]) => (
-                <button key={sz} onClick={() => setSousZoneChoisie(sz)} style={{
-                  padding: "4px 10px", borderRadius: "999px", fontSize: "11.5px", fontWeight: 600,
-                  border: `1px solid ${sousZoneChoisie === sz ? "var(--gold)" : "var(--border)"}`,
-                  background: sousZoneChoisie === sz ? "rgba(184,134,59,0.10)" : "var(--surface)",
-                  color: sousZoneChoisie === sz ? "var(--gold)" : "var(--ink-muted)", cursor: "pointer",
-                }}>
-                  {sz.replace(villeChoisie, "").trim() || sz} ({count})
-                </button>
-              ))}
-            </div>
+            ))}
           </div>
         )}
       </div>
 
-
       {resultats.length === 0 ? (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
-          No Bethels match this search/filter.
+          Aucun Bethel ne correspond à cette recherche / ce filtre.
         </div>
       ) : (
-        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "hidden" }}>
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
             <thead>
               <tr style={{ background: "var(--bg)" }}>
-                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Church ID</th>
-                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Leader</th>
-                <th style={{ textAlign: "center", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Willing?</th>
-                <th style={{ textAlign: "center", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Members</th>
-                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Zone</th>
-                <th style={{ textAlign: "left", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Status</th>
-                <th style={{ textAlign: "right", padding: "10px 14px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" }}>Actions</th>
+                <th style={thStyle()}>Code Bethel (Church ID)</th>
+                <th style={thStyle()}>Responsable</th>
+                <th style={thStyle("center")}>Membres</th>
+                <th style={thStyle()}>Statut</th>
+                <th style={thStyle("right")}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {resultats.map((b, i) => {
                 const count = memberCounts[b.bethel_id] || 0;
+                const inactif = b.status === "inactive";
+                const attente = sansResponsable(b);
+                const nomResp = b.leader_full_name || b.leader_name;
                 return (
-                  <tr key={b.bethel_id} style={{ borderTop: i > 0 ? "1px solid var(--border)" : "none" }}>
+                  <tr key={b.bethel_id} style={{ borderTop: i > 0 ? "1px solid var(--border)" : "none", opacity: enCours === b.bethel_id ? 0.5 : 1 }}>
                     <td style={{ padding: "10px 14px" }}>
-                      <div style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--ink)" }}>{b.hp_number}</div>
+                      <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--ink)", fontFamily: "var(--font-mono)" }}>{codeAffiche(b)}</div>
+                      <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{b.bethel_name_officiel || b.hp_number}</div>
                     </td>
                     <td style={{ padding: "10px 14px" }}>
-                      <button
-                        onClick={() => onOpenDetail(b)}
-                        style={{
-                          background: "none", border: "none", cursor: "pointer", padding: 0,
-                          color: "var(--ink)", fontWeight: 600, fontSize: "13px", fontFamily: "var(--font-body)",
-                          textDecoration: "underline", textDecorationColor: "var(--border)",
-                        }}
-                      >
-                        {b.leader_name || "—"}
-                      </button>
+                      <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--ink)" }}>{nomResp && !/^unassigned$/i.test(nomResp) ? nomResp : "—"}</div>
+                      {b.leader_email && <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{b.leader_email}</div>}
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                      {b.leader_willing_to_host === true ? (
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Yes</span>
-                      ) : b.leader_willing_to_host === false ? (
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", background: "rgba(162,59,51,0.10)", padding: "2px 9px", borderRadius: "999px" }}>No</span>
-                      ) : (
-                        <span style={{ fontSize: "11px", color: "var(--ink-muted)" }} title="No matching submission found — likely one of the original 191 imported groups">—</span>
-                      )}
+                      <span style={{ fontWeight: 600, color: count < 3 && !inactif ? "var(--brick)" : "var(--ink)" }}>{count}</span>
                     </td>
-                    <td style={{ padding: "10px 14px", textAlign: "center" }}>
-                      {count === 0 ? (
-                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)" }}>0 NEEDED</span>
-                      ) : (
-                        <span style={{ color: "var(--ink)" }}>{count}</span>
-                      )}
-                    </td>
-                    <td style={{ padding: "10px 14px", color: "var(--ink-muted)", fontSize: "12px" }}>{b.zone_name}</td>
                     <td style={{ padding: "10px 14px" }}>
                       <span style={{
                         fontSize: "11px", padding: "2px 9px", borderRadius: "999px", fontWeight: 600,
-                        background: b.status === "inactive" ? "rgba(162,59,51,0.10)" : "rgba(31,92,78,0.10)",
-                        color: b.status === "inactive" ? "var(--brick)" : "var(--teal)",
+                        background: inactif ? "rgba(120,120,120,0.15)" : attente ? "rgba(184,134,59,0.12)" : "rgba(31,92,78,0.10)",
+                        color: inactif ? "var(--ink-muted)" : attente ? "var(--gold)" : "var(--teal)",
                       }}>
-                        {b.status === "inactive" ? "Inactive" : "Active"}
+                        {inactif ? "Inactif" : attente ? "En attente" : "Actif"}
                       </span>
                     </td>
-                    <td style={{ padding: "10px 14px", textAlign: "right" }}>
-                      <button onClick={() => onOpenDetail(b)} style={{
-                        padding: "5px 12px", borderRadius: "6px", border: "1px solid var(--plum)",
-                        background: "transparent", color: "var(--plum)", fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                      }}>
-                        View
-                      </button>
+                    <td style={{ padding: "10px 14px" }}>
+                      <div style={{ display: "flex", gap: "6px", justifyContent: "flex-end", flexWrap: "wrap" }}>
+                        <button onClick={() => setPanneau({ mode: "voir", bethelId: b.bethel_id })} style={btnAction("var(--plum)")}>Voir</button>
+                        <button onClick={() => setPanneau({ mode: "ajouter", bethelId: b.bethel_id })} style={btnAction("var(--teal)")}>+ Ajouter un membre</button>
+                        <button onClick={() => setPanneau({ mode: "assigner", bethelId: b.bethel_id })} style={btnAction("var(--plum)")}>Assigner des membres</button>
+                        <button onClick={() => setPanneau({ mode: "proximite", bethelId: b.bethel_id })} style={btnAction("#E07B1A", true)}>Trouver à proximité</button>
+                        <button onClick={() => basculerStatut(b)} style={btnAction(inactif ? "var(--teal)" : "var(--brick)")}>
+                          {inactif ? "Réactiver" : "Désactiver"}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -3160,6 +3326,18 @@ function BethelsView({ bethels, memberCounts, onOpenDetail }) {
             </tbody>
           </table>
         </div>
+      )}
+
+      {bethelPanneau && (
+        <BethelSidePanel
+          key={`${panneau.mode}-${bethelPanneau.bethel_id}`}
+          bethel={bethelPanneau}
+          mode={panneau.mode}
+          bethels={bethels}
+          onClose={() => setPanneau(null)}
+          onReload={onReload}
+          onOpenDetail={onOpenDetail}
+        />
       )}
     </div>
   );
@@ -5811,7 +5989,7 @@ function BethelAdminPortalInner() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [zonesData, campusesData, submissionsData, bethelsRaw, membresLegers] = await Promise.all([
+      const [zonesData, campusesData, submissionsData, bethelsRaw, membresLegers, responsables] = await Promise.all([
         supaGet("data_zones", "select=*&is_active=eq.true&order=zone_name.asc"),
         supaGet("campuses", "select=*&campus_code=eq.MTL"),
         supaGet("submissions", "select=*&order=submitted_at.desc&limit=5000"),
@@ -5824,6 +6002,8 @@ function BethelAdminPortalInner() {
         // dans Search Members.
         supaGet("bethels", "select=*&order=created_at.desc&limit=5000"),
         supaGetTout("members", "select=bethel_id,first_name,last_name,willing_to_host"),
+        // Responsables (Bethel Leader actifs) : nom + courriel pour la page Bethels
+        supaGetTout("members", "select=bethel_id,first_name,last_name,email&role=eq.Bethel%20Leader&status=eq.active"),
       ]);
       setZones(zonesData);
       if (campusesData[0]) setCampusId(campusesData[0].campus_id);
@@ -5859,10 +6039,17 @@ function BethelAdminPortalInner() {
         return meilleurScore >= seuil ? meilleur : null;
       }
 
+      const responsableParBethel = {};
+      responsables.forEach((m) => { if (!responsableParBethel[m.bethel_id]) responsableParBethel[m.bethel_id] = m; });
+
       setBethels(bethelsRaw.map((b) => {
+        const resp = responsableParBethel[b.bethel_id];
         const soumissionDuLeader = trouveSoumissionDuLeader(b.leader_name || "");
         return {
           ...b,
+          has_leader_member: !!resp,
+          leader_full_name: resp ? `${resp.first_name || ""} ${resp.last_name || ""}`.trim() : "",
+          leader_email: resp?.email || "",
           zone_name: zoneById[b.zone_id]?.zone_name || "Unknown zone",
           zone_code: zoneById[b.zone_id]?.zone_code || "",
           city_name: zoneById[b.zone_id]?.city_name || "",
@@ -6052,7 +6239,7 @@ function BethelAdminPortalInner() {
                 onAddNew={() => setShowNewSubmission(true)}
               />
             )}
-            {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} />}
+            {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} onReload={loadAll} />}
             {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
