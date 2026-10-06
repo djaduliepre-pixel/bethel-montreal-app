@@ -3786,6 +3786,13 @@ function estValeurVide(v) {
   return !v || !String(v).trim() || String(v).trim().toUpperCase() === "UNASSIGNED";
 }
 
+// Compare deux noms sans tenir compte des accents, de la casse ni des espaces multiples.
+function normaliserNom(v) {
+  return String(v || "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase().replace(/\s+/g, " ").trim();
+}
+
 function BethelSupervisionReport() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -3850,14 +3857,23 @@ function BethelSupervisionReport() {
             : (b.leader_name || "");
 
           const zone = zoneById[b.zone_id];
-          const missingMinister = estValeurVide(minister);
-          const missingOverseer = estValeurVide(overseer);
+          // Un Ministre Ordonné qui dirige lui-même son Bethel est son propre ministre et
+          // n'a pas d'overseer : c'est le pasteur de campus qui le supervise directement.
+          const ministreDirige =
+            !estValeurVide(bethelLeader) &&
+            (normaliserNom(minister) === normaliserNom(bethelLeader) ||
+              equipe.some((m) => m.role === "Ministre Ordonné" &&
+                normaliserNom(`${m.first_name} ${m.last_name}`) === normaliserNom(bethelLeader)));
+          const ministerAffiche = ministreDirige && estValeurVide(minister) ? bethelLeader : minister;
+          const missingMinister = estValeurVide(ministerAffiche);
+          const missingOverseer = ministreDirige ? false : estValeurVide(overseer);
           const missingLeader = estValeurVide(bethelLeader);
 
           return {
             bethelId: b.bethel_id,
             pastor: CAMPUS_PASTOR,
-            minister, overseer, bethelLeader,
+            ministreDirige,
+            minister: ministerAffiche, overseer, bethelLeader,
             churchId: b.church_id || "",
             bethelName: b.bethel_name_officiel || b.hp_number,
             zone: zone?.zone_code || zone?.zone_name || "—",
@@ -3956,7 +3972,7 @@ function BethelSupervisionReport() {
       if (r.bethelId !== bethelId) return r;
       const maj = { ...r, [champ]: valeur || "" };
       maj.missingMinister = estValeurVide(maj.minister);
-      maj.missingOverseer = estValeurVide(maj.overseer);
+      maj.missingOverseer = r.ministreDirige ? false : estValeurVide(maj.overseer);
       maj.missingLeader = estValeurVide(maj.bethelLeader);
       maj.chainComplete = !maj.missingMinister && !maj.missingOverseer && !maj.missingLeader;
       return maj;
