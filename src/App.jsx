@@ -3124,6 +3124,51 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
   );
 }
 
+function DistanceDeuxAdresses() {
+  const [ouvert, setOuvert] = useState(false);
+  const [a, setA] = useState("");
+  const [b, setB] = useState("");
+  const [minutes, setMinutes] = useState(null);
+  const [erreur, setErreur] = useState("");
+  const [calcul, setCalcul] = useState(false);
+
+  async function calculer() {
+    if (!a.trim() || !b.trim()) return;
+    setCalcul(true); setErreur(""); setMinutes(null);
+    try { setMinutes(await getDrivingMinutes(a, b)); }
+    catch (e) { setErreur(e.message || "Trajet introuvable"); }
+    finally { setCalcul(false); }
+  }
+
+  const champ = { width: "100%", boxSizing: "border-box", padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13px", marginBottom: "8px" };
+  if (!ouvert) {
+    return (
+      <button onClick={() => setOuvert(true)} style={{ marginBottom: "14px", padding: "6px 14px", borderRadius: "999px", border: "1px dashed var(--border)", background: "transparent", color: "var(--plum)", fontSize: "12.5px", fontWeight: 600, cursor: "pointer" }}>
+        🚗 Distance entre deux adresses
+      </button>
+    );
+  }
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "14px", background: "var(--bg)", maxWidth: "460px", marginBottom: "16px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "8px" }}>
+        <span style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)" }}>Distance entre deux adresses (en voiture)</span>
+        <button onClick={() => setOuvert(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
+      </div>
+      <input style={champ} placeholder="Adresse 1 (ex. 699 boul. Lucille-Teasdale, Terrebonne)" value={a} onChange={(e) => setA(e.target.value)} />
+      <input style={champ} placeholder="Adresse 2 (ex. 1611 chemin St-Charles, Terrebonne)" value={b} onChange={(e) => setB(e.target.value)} />
+      <button disabled={calcul} onClick={calculer} style={{ padding: "7px 14px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "12.5px", fontWeight: 600, cursor: "pointer" }}>
+        {calcul ? "Calcul…" : "Calculer"}
+      </button>
+      {minutes != null && (
+        <div style={{ marginTop: "10px", fontSize: "14px", fontWeight: 700, color: minutes <= LIMITE_MINUTES_PROXIMITE ? "var(--teal)" : "var(--gold)" }}>
+          🚗 {minutes} min {minutes <= LIMITE_MINUTES_PROXIMITE ? `— dans la limite de ${LIMITE_MINUTES_PROXIMITE} min` : `— au-delà de ${LIMITE_MINUTES_PROXIMITE} min`}
+        </div>
+      )}
+      {erreur && <div style={{ marginTop: "10px", fontSize: "12.5px", color: "var(--brick)" }}>⚠️ {erreur}</div>}
+    </div>
+  );
+}
+
 function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState("all");
@@ -3230,6 +3275,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
           style={{ width: "100%", boxSizing: "border-box", padding: "8px 10px 8px 32px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", outline: "none" }}
         />
       </div>
+
+      <DistanceDeuxAdresses />
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "10px", flexWrap: "wrap" }}>
         {filtres.map((f) => (
