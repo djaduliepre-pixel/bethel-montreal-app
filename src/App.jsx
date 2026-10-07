@@ -593,6 +593,7 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
   const [zoneQuery, setZoneQuery] = useState("");
   const [selectedZone, setSelectedZone] = useState(null);
   const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
+  const supervisionParBethel = useSupervisionParBethel();
   const [loadingDistances, setLoadingDistances] = useState(false);
   const [selectedBethel, setSelectedBethel] = useState(null);
 
@@ -777,6 +778,7 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
                     <div>
                       <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{c.bethel.leader_name}</div>
                       <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{c.bethel.hp_number}</div>
+                      <LigneSupervisionBethel rows={supervisionParBethel[c.bethel.bethel_id]} />
                     </div>
                     {c.minutes != null ? (
                       <span style={{
@@ -939,6 +941,7 @@ function ManageMembersView({ bethels, onChanged }) {
     address: "", postal_code: "", role: "Membre", willing_to_host: false,
   });
   const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
+  const supervisionParBethel = useSupervisionParBethel();
   const [loadingDistances, setLoadingDistances] = useState(false);
   const [selectedBethel, setSelectedBethel] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1330,6 +1333,7 @@ function ManageMembersView({ bethels, onChanged }) {
                   <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>
                     {c.bethel.hp_number} · {c.bethel.zone_name || "zone inconnue"}
                   </div>
+                  <LigneSupervisionBethel rows={supervisionParBethel[c.bethel.bethel_id]} />
                 </div>
                 {c.minutes != null ? (
                   <span style={{
@@ -3791,6 +3795,43 @@ function normaliserNom(v) {
   return String(v || "")
     .normalize("NFD").replace(/[̀-ͯ]/g, "")
     .toLowerCase().replace(/\s+/g, " ").trim();
+}
+
+// Lecture seule de la copie du Google Sheet (table supervision_sheet) : renvoie
+// { bethel_id: [lignes] } pour afficher le ministre et l'overseer à côté d'un Bethel proposé.
+// En cas d'erreur, renvoie {} et rien ne s'affiche : les listes fonctionnent comme avant.
+function useSupervisionParBethel() {
+  const [parBethel, setParBethel] = useState({});
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const rows = await supaGetTout("supervision_sheet", "actif=eq.true&bethel_id=not.is.null&select=bethel_id,ministre,overseer,leader");
+        if (annule) return;
+        const m = {};
+        rows.forEach((r) => { (m[r.bethel_id] = m[r.bethel_id] || []).push(r); });
+        setParBethel(m);
+      } catch (e) { /* silencieux : affichage optionnel */ }
+    })();
+    return () => { annule = true; };
+  }, []);
+  return parBethel;
+}
+
+// Petite ligne grise « Ministre · Overseer » sous un Bethel proposé (rien si le Bethel n'est pas dans le fichier).
+function LigneSupervisionBethel({ rows }) {
+  if (!rows || rows.length === 0) return null;
+  const r = rows.find((x) => !estValeurVide(x.ministre) || !estValeurVide(x.overseer)) || rows[0];
+  const ministre = estValeurVide(r.ministre) ? "" : r.ministre;
+  const overseer = estValeurVide(r.overseer) ? "" : r.overseer;
+  const ministreLeader = ministre && !estValeurVide(r.leader) && normaliserNom(ministre) === normaliserNom(r.leader);
+  return (
+    <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "2px" }}>
+      {ministreLeader
+        ? `Ministre-leader : ${ministre}`
+        : `Ministre : ${ministre || "non renseigné"} · Overseer : ${overseer || "non renseigné"}`}
+    </div>
+  );
 }
 
 function BethelSupervisionReport() {
