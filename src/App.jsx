@@ -4391,6 +4391,7 @@ function BethelSupervisionReport() {
     { id: "leadership", label: "Leadership" },
     { id: "actionview", label: "Actions requises" },
     { id: "dataquality", label: "Qualité des données" },
+    { id: "fichiersheet", label: "Fichier Google Sheet" },
   ];
 
   const thStyle = { padding: "8px 10px", textAlign: "left", fontSize: "10.5px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid var(--border)" };
@@ -4610,6 +4611,8 @@ function BethelSupervisionReport() {
         </div>
       )}
 
+      {subTab === "fichiersheet" && <SupervisionSheetPanel />}
+
       {subTab === "dataquality" && (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto" }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -4652,6 +4655,202 @@ function BethelSupervisionReport() {
           row={rows.find((r) => r.bethelId === drawerBethelId) || null}
           onClose={() => setDrawerBethelId(null)}
         />
+      )}
+    </div>
+  );
+}
+
+// --- Fichier Google Sheet de supervision (lecture seule) -------------------
+// Affiche la copie du Sheet « Copie de BETHEL_MONTREAL_MANITOBA_NEWBRUNSWICK » (onglet _Données)
+// stockée dans la table supervision_sheet. La synchro passe par la fonction Supabase
+// sync-supervision-sheet : elle lit le Sheet (jamais d'écriture dedans) et ne supprime rien
+// (une ligne absente du fichier est marquée inactive). bethels et members ne sont pas touchés.
+function SupervisionSheetPanel() {
+  const [lignes, setLignes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [erreur, setErreur] = useState(null);
+  const [campus, setCampus] = useState("tous");
+  const [recherche, setRecherche] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  const [resultat, setResultat] = useState(null);
+
+  async function charger() {
+    setLoading(true);
+    setErreur(null);
+    try {
+      const data = await supaGetTout("supervision_sheet", "actif=eq.true&select=*&order=id");
+      setLignes(data);
+    } catch (e) {
+      setErreur(e.message);
+      setLignes([]);
+    } finally {
+      setLoading(false);
+    }
+  }
+  useEffect(() => { charger(); }, []);
+
+  async function appelerSynchro(apply) {
+    setEnCours(true);
+    setResultat(null);
+    try {
+      const res = await fetch(`${SUPABASE_URL}/functions/v1/sync-supervision-sheet`, {
+        method: "POST",
+        headers: { apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ apply }),
+      });
+      const j = await res.json().catch(() => ({ ok: false, erreur: `Réponse illisible (${res.status})` }));
+      setResultat(j);
+      if (j.ok && apply) await charger();
+    } catch (e) {
+      setResultat({ ok: false, erreur: e.message });
+    } finally {
+      setEnCours(false);
+    }
+  }
+
+  function lancerSynchro() {
+    if (window.confirm("Synchroniser maintenant ? Le Google Sheet est lu en lecture seule et seule la copie dans l'app est mise à jour. Aucune donnée n'est supprimée.")) {
+      appelerSynchro(true);
+    }
+  }
+
+  const campusListe = useMemo(() => Array.from(new Set(lignes.map((l) => l.campus))).sort(), [lignes]);
+  const vue = useMemo(() => {
+    const q = recherche.trim().toLowerCase();
+    return lignes.filter((l) => {
+      if (campus !== "tous" && l.campus !== campus) return false;
+      if (!q) return true;
+      return [l.n_bethel, l.leader, l.ministre, l.overseer, l.l_zone, l.l_tel, l.l_courriel]
+        .some((v) => String(v || "").toLowerCase().includes(q));
+    });
+  }, [lignes, campus, recherche]);
+
+  const statsCampus = useMemo(() => {
+    const out = {};
+    lignes.forEach((l) => {
+      const s = (out[l.campus] = out[l.campus] || { lignes: 0, bethels: new Set(), leaders: new Set(), ministres: new Set(), overseers: new Set() });
+      s.lignes += 1;
+      if (l.n_bethel) s.bethels.add(l.n_bethel);
+      if (l.leader) s.leaders.add(`${String(l.leader).toLowerCase()}|${l.n_bethel || ""}`);
+      if (l.ministre) s.ministres.add(String(l.ministre).toLowerCase());
+      if (l.overseer) s.overseers.add(String(l.overseer).toLowerCase());
+    });
+    return out;
+  }, [lignes]);
+
+  const th = { padding: "8px 10px", textAlign: "left", fontSize: "10.5px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const td = { padding: "8px 10px", fontSize: "12px", color: "var(--ink)", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" };
+  const btn = (actif) => ({
+    padding: "6px 14px", borderRadius: "8px", fontSize: "12.5px", fontWeight: 600, cursor: enCours ? "wait" : "pointer",
+    border: `1px solid ${actif ? "var(--plum)" : "var(--border)"}`,
+    background: actif ? "var(--plum)" : "var(--surface)", color: actif ? "#fff" : "var(--ink)",
+    opacity: enCours ? 0.6 : 1,
+  });
+
+  return (
+    <div>
+      <p style={{ color: "var(--ink-muted)", fontSize: "12.5px", margin: "0 0 12px" }}>
+        Copie en lecture seule de l'onglet « _Données » du Google Sheet de supervision. Le Sheet n'est jamais modifié par l'application.
+      </p>
+
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center", marginBottom: "12px" }}>
+        <button disabled={enCours} onClick={() => appelerSynchro(false)} style={btn(false)}>Tester (sans rien écrire)</button>
+        <button disabled={enCours} onClick={lancerSynchro} style={btn(true)}>Synchroniser maintenant</button>
+        {enCours && <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>En cours…</span>}
+      </div>
+
+      {resultat && (
+        <div style={{ border: `1px solid ${resultat.ok ? "var(--teal)" : "var(--brick)"}`, borderRadius: "10px", padding: "10px 12px", marginBottom: "14px", fontSize: "12px" }}>
+          {!resultat.ok ? (
+            <div style={{ color: "var(--brick)", fontWeight: 600 }}>Erreur : {resultat.erreur}</div>
+          ) : (
+            <div>
+              <div style={{ fontWeight: 700, marginBottom: 6, color: "var(--teal)" }}>
+                {resultat.ecriture ? "Synchronisation terminée" : "Test à blanc (rien n'a été écrit)"}
+              </div>
+              <div>{resultat.lignes_total} lignes · {resultat.ministres_total} ministres · {resultat.bethels_rattaches_a_la_base} Bethels rattachés à la base · {resultat.lignes_qui_seraient_desactivees} ligne(s) {resultat.ecriture ? "désactivée(s)" : "qui seraient désactivées"}</div>
+              {Object.entries(resultat.par_campus || {}).map(([c, s]) => (
+                <div key={c} style={{ color: "var(--ink-muted)" }}>
+                  {c} : {s.n_bethel} N° Bethel · {s.leaders} leaders · {s.sans_leader} sans leader · {s.ministres} ministres · {s.overseers} overseers
+                </div>
+              ))}
+              {(resultat.n_bethel_sans_correspondance || []).length > 0 && (
+                <div style={{ color: "var(--brick)", marginTop: 4 }}>
+                  N° sans correspondance dans la base : {resultat.n_bethel_sans_correspondance.join(", ")}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Chargement…</div>
+      ) : erreur ? (
+        <div style={{ fontSize: "13px", color: "var(--brick)" }}>Erreur : {erreur}</div>
+      ) : lignes.length === 0 ? (
+        <div style={{ fontSize: "13px", color: "var(--ink-muted)", border: "1px dashed var(--border)", borderRadius: "10px", padding: "16px" }}>
+          Aucune donnée synchronisée pour l'instant. Lance d'abord « Tester (sans rien écrire) », puis « Synchroniser maintenant ».
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "14px" }}>
+            {Object.entries(statsCampus).map(([c, s]) => (
+              <div key={c} style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "12px", background: "var(--surface)" }}>
+                <div style={{ fontWeight: 700, color: "var(--plum)" }}>{c}</div>
+                <div>{s.bethels.size} N° Bethel · {s.leaders.size} leaders</div>
+                <div style={{ color: "var(--ink-muted)" }}>{s.ministres.size} ministres · {s.overseers.size} overseers</div>
+              </div>
+            ))}
+          </div>
+
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "10px", alignItems: "center" }}>
+            <select value={campus} onChange={(e) => setCampus(e.target.value)} style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px" }}>
+              <option value="tous">Tous les campus</option>
+              {campusListe.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <input value={recherche} onChange={(e) => setRecherche(e.target.value)} placeholder="Rechercher (N° Bethel, nom, zone, téléphone…)"
+              style={{ padding: "6px 10px", borderRadius: "8px", border: "1px solid var(--border)", fontSize: "12.5px", minWidth: "260px" }} />
+            <span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>{vue.length} ligne(s)</span>
+          </div>
+
+          <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto", maxHeight: "560px" }}>
+            <table style={{ borderCollapse: "collapse", width: "100%" }}>
+              <thead>
+                <tr style={{ background: "var(--bg)", position: "sticky", top: 0 }}>
+                  <th style={th}>Campus</th>
+                  <th style={th}>Ministre</th>
+                  <th style={th}>Overseer</th>
+                  <th style={th}>N° Bethel</th>
+                  <th style={th}>Leader</th>
+                  <th style={th}>Téléphone</th>
+                  <th style={th}>Courriel</th>
+                  <th style={th}>Zone</th>
+                  <th style={th}>Rôle</th>
+                  <th style={th}>Notes</th>
+                  <th style={th}>Dans la base</th>
+                </tr>
+              </thead>
+              <tbody>
+                {vue.map((l) => (
+                  <tr key={l.id}>
+                    <td style={td}>{l.campus}</td>
+                    <td style={td}>{l.ministre || "—"}</td>
+                    <td style={td}>{l.overseer || "—"}</td>
+                    <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{l.n_bethel || "—"}</td>
+                    <td style={td}>{l.leader || "—"}</td>
+                    <td style={td}>{l.l_tel || "—"}</td>
+                    <td style={{ ...td, fontFamily: "var(--font-mono)", fontSize: "11px" }}>{l.l_courriel || "—"}</td>
+                    <td style={td}>{l.l_zone || "—"}</td>
+                    <td style={td}>{l.role_leader || "—"}</td>
+                    <td style={td}>{l.notes || ""}</td>
+                    <td style={td}>{l.bethel_id ? "Oui" : l.n_bethel ? "Non" : "—"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
