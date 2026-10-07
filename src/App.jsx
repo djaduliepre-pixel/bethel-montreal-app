@@ -594,6 +594,7 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
   const [selectedZone, setSelectedZone] = useState(null);
   const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
   const supervisionParBethel = useSupervisionParBethel();
+  const nbMembresParBethel = useNombreMembresParBethel();
   const [loadingDistances, setLoadingDistances] = useState(false);
   const [selectedBethel, setSelectedBethel] = useState(null);
 
@@ -778,7 +779,7 @@ function AssignMemberModal({ submission, zones, bethels, onClose, onAssign, assi
                     <div>
                       <div style={{ fontSize: "13.5px", fontWeight: 600, color: "var(--ink)" }}>{c.bethel.leader_name}</div>
                       <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{c.bethel.hp_number}</div>
-                      <LigneSupervisionBethel rows={supervisionParBethel[c.bethel.bethel_id]} />
+                      <LigneSupervisionBethel rows={supervisionParBethel[c.bethel.bethel_id]} nbMembres={nbMembresParBethel ? (nbMembresParBethel[c.bethel.bethel_id] || 0) : null} />
                     </div>
                     {c.minutes != null ? (
                       <span style={{
@@ -942,6 +943,7 @@ function ManageMembersView({ bethels, onChanged }) {
   });
   const [candidates, setCandidates] = useState([]); // [{bethel, minutes|null, error|null}]
   const supervisionParBethel = useSupervisionParBethel();
+  const nbMembresParBethel = useNombreMembresParBethel();
   const [loadingDistances, setLoadingDistances] = useState(false);
   const [selectedBethel, setSelectedBethel] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -1333,7 +1335,7 @@ function ManageMembersView({ bethels, onChanged }) {
                   <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>
                     {c.bethel.hp_number} · {c.bethel.zone_name || "zone inconnue"}
                   </div>
-                  <LigneSupervisionBethel rows={supervisionParBethel[c.bethel.bethel_id]} />
+                  <LigneSupervisionBethel rows={supervisionParBethel[c.bethel.bethel_id]} nbMembres={nbMembresParBethel ? (nbMembresParBethel[c.bethel.bethel_id] || 0) : null} />
                 </div>
                 {c.minutes != null ? (
                   <span style={{
@@ -3818,18 +3820,93 @@ function useSupervisionParBethel() {
   return parBethel;
 }
 
-// Petite ligne grise « Ministre · Overseer » sous un Bethel proposé (rien si le Bethel n'est pas dans le fichier).
-function LigneSupervisionBethel({ rows }) {
-  if (!rows || rows.length === 0) return null;
-  const r = rows.find((x) => !estValeurVide(x.ministre) || !estValeurVide(x.overseer)) || rows[0];
-  const ministre = estValeurVide(r.ministre) ? "" : r.ministre;
-  const overseer = estValeurVide(r.overseer) ? "" : r.overseer;
-  const ministreLeader = ministre && !estValeurVide(r.leader) && normaliserNom(ministre) === normaliserNom(r.leader);
+// Nombre de membres actifs par Bethel (lecture seule), pour l'afficher dans les listes de Bethels proposés.
+// Renvoie null tant que ce n'est pas chargé (ou en cas d'erreur) : rien ne s'affiche alors.
+function useNombreMembresParBethel() {
+  const [nb, setNb] = useState(null);
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const rows = await supaGetTout("members", "status=eq.active&bethel_id=not.is.null&select=bethel_id");
+        if (annule) return;
+        const m = {};
+        rows.forEach((r) => { m[r.bethel_id] = (m[r.bethel_id] || 0) + 1; });
+        setNb(m);
+      } catch (e) { /* silencieux : affichage optionnel */ }
+    })();
+    return () => { annule = true; };
+  }, []);
+  return nb;
+}
+
+// Petite ligne grise « Ministre · Overseer · N membres » sous un Bethel proposé.
+// Rien si on n'a ni information de supervision ni nombre de membres.
+function LigneSupervisionBethel({ rows, nbMembres }) {
+  const aSup = rows && rows.length > 0;
+  const aNb = nbMembres !== null && nbMembres !== undefined;
+  if (!aSup && !aNb) return null;
+  let texte = "";
+  if (aSup) {
+    const r = rows.find((x) => !estValeurVide(x.ministre) || !estValeurVide(x.overseer)) || rows[0];
+    const ministre = estValeurVide(r.ministre) ? "" : r.ministre;
+    const overseer = estValeurVide(r.overseer) ? "" : r.overseer;
+    const ministreLeader = ministre && !estValeurVide(r.leader) && normaliserNom(ministre) === normaliserNom(r.leader);
+    texte = ministreLeader
+      ? `Ministre-leader : ${ministre}`
+      : `Ministre : ${ministre || "non renseigné"} · Overseer : ${overseer || "non renseigné"}`;
+  }
+  if (aNb) texte += `${texte ? " · " : ""}${nbMembres} membre${nbMembres > 1 ? "s" : ""}`;
+  return <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "2px" }}>{texte}</div>;
+}
+
+// Fenêtre en lecture seule : liste des membres d'un Bethel (aucune modification possible).
+function MembresBethelModal({ bethelId, titre, onClose }) {
+  const [membres, setMembres] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [erreur, setErreur] = useState(null);
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const data = await supaGet("members", `bethel_id=eq.${bethelId}&select=first_name,last_name,role,phone,status&order=role.asc,first_name.asc`);
+        if (!annule) setMembres(data);
+      } catch (e) {
+        if (!annule) setErreur(e.message);
+      } finally {
+        if (!annule) setLoading(false);
+      }
+    })();
+    return () => { annule = true; };
+  }, [bethelId]);
   return (
-    <div style={{ fontSize: "11px", color: "var(--ink-muted)", marginTop: "2px" }}>
-      {ministreLeader
-        ? `Ministre-leader : ${ministre}`
-        : `Ministre : ${ministre || "non renseigné"} · Overseer : ${overseer || "non renseigné"}`}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(36,30,24,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: "20px" }} onClick={onClose}>
+      <div style={{ background: "var(--surface)", borderRadius: "14px", width: "460px", maxWidth: "100%", maxHeight: "80vh", display: "flex", flexDirection: "column", padding: "24px", boxShadow: "0 24px 60px rgba(36,30,24,0.25)" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
+          <div>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: 0, color: "var(--ink)" }}>Membres du Bethel</h2>
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "4px", fontFamily: "var(--font-mono)" }}>{titre}</div>
+          </div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", fontSize: "18px", padding: "4px" }}>✕</button>
+        </div>
+        <div style={{ marginTop: "14px", overflowY: "auto" }}>
+          {loading && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Chargement…</div>}
+          {erreur && <div style={{ fontSize: "13px", color: "var(--brick)" }}>Impossible de charger les membres : {erreur}</div>}
+          {!loading && !erreur && membres.length === 0 && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Aucun membre enregistré pour ce Bethel.</div>}
+          {!loading && !erreur && membres.length > 0 && (
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "8px" }}>{membres.length} membre{membres.length > 1 ? "s" : ""}</div>
+          )}
+          {membres.map((m, i) => (
+            <div key={i} style={{ padding: "8px 0", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", gap: "10px" }}>
+              <div>
+                <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{m.first_name} {m.last_name}</div>
+                <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{m.role || "Membre"}{m.status === "inactive" ? " · inactif" : ""}</div>
+              </div>
+              <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)", whiteSpace: "nowrap" }}>{m.phone || ""}</div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }
@@ -4714,6 +4791,7 @@ function SupervisionSheetPanel() {
   const [recherche, setRecherche] = useState("");
   const [enCours, setEnCours] = useState(false);
   const [resultat, setResultat] = useState(null);
+  const [bethelOuvert, setBethelOuvert] = useState(null); // { id, titre } -> fenêtre des membres
 
   async function charger() {
     setLoading(true);
@@ -4885,13 +4963,28 @@ function SupervisionSheetPanel() {
                     <td style={td}>{l.l_zone || "—"}</td>
                     <td style={td}>{l.role_leader || "—"}</td>
                     <td style={td}>{l.notes || ""}</td>
-                    <td style={td}>{l.bethel_id ? "Oui" : l.n_bethel ? "Non" : "—"}</td>
+                    <td style={td}>
+                      {l.bethel_id ? (
+                        <>
+                          Oui{" · "}
+                          <button
+                            onClick={() => setBethelOuvert({ id: l.bethel_id, titre: `${l.n_bethel || ""} · ${l.leader || ""}` })}
+                            style={{ background: "none", border: "none", padding: 0, cursor: "pointer", color: "var(--plum)", fontSize: "12px", textDecoration: "underline", fontFamily: "var(--font-body)" }}
+                          >
+                            voir les membres
+                          </button>
+                        </>
+                      ) : l.n_bethel ? "Non" : "—"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         </>
+      )}
+      {bethelOuvert && (
+        <MembresBethelModal bethelId={bethelOuvert.id} titre={bethelOuvert.titre} onClose={() => setBethelOuvert(null)} />
       )}
     </div>
   );
