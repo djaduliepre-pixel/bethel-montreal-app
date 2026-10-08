@@ -4836,12 +4836,19 @@ function SupervisionSheetPanel() {
   const campusListe = useMemo(() => Array.from(new Set(lignes.map((l) => l.campus))).sort(), [lignes]);
   const vue = useMemo(() => {
     const q = normaliserNom(recherche); // insensible aux accents, à la casse et aux espaces multiples
-    return lignes.filter((l) => {
+    const cle = (v) => normaliserNom(v || "");
+    const filtrees = lignes.filter((l) => {
       if (campus !== "tous" && l.campus !== campus) return false;
       if (!q) return true;
       return [l.n_bethel, l.leader, l.ministre, l.overseer, l.l_zone, l.l_tel, l.l_courriel]
         .some((v) => normaliserNom(v).includes(q));
     });
+    // Affichage seulement : même ordre que le Google Sheet (campus, puis position de la ligne dans le fichier)
+    const pos = (v) => { const n = parseInt(v, 10); return Number.isNaN(n) ? 1e9 : n; };
+    return [...filtrees].sort((a, b) =>
+      cle(a.campus).localeCompare(cle(b.campus)) ||
+      pos(a.ligne_campus) - pos(b.ligne_campus) ||
+      (a.id || 0) - (b.id || 0));
   }, [lignes, campus, recherche]);
 
   const statsCampus = useMemo(() => {
