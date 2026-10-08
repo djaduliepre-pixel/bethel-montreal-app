@@ -3193,6 +3193,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     { id: "active", label: "Actif" },
     { id: "inactive", label: "Inactif" },
     { id: "needs_members", label: "Besoin de membres" },
+    { id: "willing_yes", label: "Willing : Oui" },
+    { id: "willing_no", label: "Willing : Non" },
   ];
 
   const villes = useMemo(() => {
@@ -3220,6 +3222,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     if (filtre === "active") liste = liste.filter((b) => b.status !== "inactive");
     if (filtre === "inactive") liste = liste.filter((b) => b.status === "inactive");
     if (filtre === "needs_members") liste = liste.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3);
+    if (filtre === "willing_yes") liste = liste.filter((b) => b.leader_willing_to_host === true);
+    if (filtre === "willing_no") liste = liste.filter((b) => b.leader_willing_to_host === false);
     if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
     if (sousZoneChoisie !== "all") liste = liste.filter((b) => b.zone_name === sousZoneChoisie);
     const q = normaliseNom(recherche);
@@ -3236,6 +3240,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     if (id === "pending") return bethels.filter(sansResponsable).length;
     if (id === "active") return bethels.filter((b) => b.status !== "inactive").length;
     if (id === "inactive") return bethels.filter((b) => b.status === "inactive").length;
+    if (id === "willing_yes") return bethels.filter((b) => b.leader_willing_to_host === true).length;
+    if (id === "willing_no") return bethels.filter((b) => b.leader_willing_to_host === false).length;
     return bethels.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3).length;
   };
 
@@ -3329,6 +3335,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
               <tr style={{ background: "var(--bg)" }}>
                 <th style={thStyle()}>Code Bethel (Church ID)</th>
                 <th style={thStyle()}>Responsable</th>
+                <th style={thStyle("center")}>Willing ?</th>
                 <th style={thStyle("center")}>Membres</th>
                 <th style={thStyle()}>Statut</th>
                 <th style={thStyle("right")}>Actions</th>
@@ -3349,6 +3356,15 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
                     <td style={{ padding: "10px 14px" }}>
                       <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--ink)" }}>{nomResp && !/^unassigned$/i.test(nomResp) ? nomResp : "—"}</div>
                       {b.leader_email && <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{b.leader_email}</div>}
+                    </td>
+                    <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                      {b.leader_willing_to_host === true ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Oui</span>
+                      ) : b.leader_willing_to_host === false ? (
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", background: "rgba(162,59,51,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Non</span>
+                      ) : (
+                        <span style={{ fontSize: "11px", color: "var(--ink-muted)" }} title="Aucune soumission trouvée pour ce responsable (probablement un des groupes importés au début)">—</span>
+                      )}
                     </td>
                     <td style={{ padding: "10px 14px", textAlign: "center" }}>
                       <span style={{ fontWeight: 600, color: count < 3 && !inactif ? "var(--brick)" : "var(--ink)" }}>{count}</span>
