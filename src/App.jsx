@@ -4835,12 +4835,12 @@ function SupervisionSheetPanel() {
 
   const campusListe = useMemo(() => Array.from(new Set(lignes.map((l) => l.campus))).sort(), [lignes]);
   const vue = useMemo(() => {
-    const q = recherche.trim().toLowerCase();
+    const q = normaliserNom(recherche); // insensible aux accents, à la casse et aux espaces multiples
     return lignes.filter((l) => {
       if (campus !== "tous" && l.campus !== campus) return false;
       if (!q) return true;
       return [l.n_bethel, l.leader, l.ministre, l.overseer, l.l_zone, l.l_tel, l.l_courriel]
-        .some((v) => String(v || "").toLowerCase().includes(q));
+        .some((v) => normaliserNom(v).includes(q));
     });
   }, [lignes, campus, recherche]);
 
