@@ -6187,6 +6187,162 @@ function SearchMembersView({ bethels, onOpenBethel }) {
 /* ------------------------------------------------------------------ */
 /* App                                                                 */
 /* ------------------------------------------------------------------ */
+/* ------------------------------------------------------------------ */
+/* Vue : Présences hebdomadaires (table attendance). Une ligne par     */
+/* Bethel et par semaine (lundi → dimanche). Ne supprime rien.         */
+/* ------------------------------------------------------------------ */
+const dateIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+function lundiDe(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const j = (x.getDay() + 6) % 7; x.setDate(x.getDate() - j); return x; }
+
+function AttendanceView() {
+  const [lundi, setLundi] = useState(() => lundiDe(new Date()));
+  const [bethels, setBethels] = useState(null);
+  const [zonesVille, setZonesVille] = useState({});
+  const [lignes, setLignes] = useState({}); // bethel_id -> ligne attendance enregistrée
+  const [saisie, setSaisie] = useState({});  // bethel_id -> valeurs en cours de saisie
+  const [recherche, setRecherche] = useState("");
+  const [filtre, setFiltre] = useState("tous");
+  const [enCours, setEnCours] = useState("");
+  const [message, setMessage] = useState("");
+  const debut = dateIso(lundi);
+  const fin = dateIso(new Date(lundi.getFullYear(), lundi.getMonth(), lundi.getDate() + 6));
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [bets, zones] = await Promise.all([
+          supaGetTout("bethels", "status=eq.active&select=bethel_id,hp_number,bethel_name_officiel,leader_name,zone_id&order=hp_number.asc"),
+          supaGet("data_zones", "select=zone_id,city_name&limit=2000"),
+        ]);
+        setBethels(bets.filter(estBethelOfficielLigne));
+        setZonesVille(Object.fromEntries(zones.map((z) => [z.zone_id, z.city_name])));
+      } catch (e) { setMessage("Erreur : " + e.message); setBethels([]); }
+    })();
+  }, []);
+
+  async function chargerSemaine() {
+    try {
+      const rows = await supaGetTout("attendance", `week_start_date=eq.${debut}&select=*`);
+      setLignes(Object.fromEntries(rows.map((r) => [r.bethel_id, r])));
+      setSaisie({});
+      setMessage("");
+    } catch (e) { setMessage("Erreur de chargement des présences : " + e.message); }
+  }
+  useEffect(() => { chargerSemaine(); /* eslint-disable-next-line */ }, [debut]);
+
+  const CHAMPS = [
+    { id: "sunday_count", label: "Dimanche" },
+    { id: "visitors_count", label: "Visiteurs" },
+    { id: "midweek_count", label: "Semaine" },
+    { id: "decisions_count", label: "Décisions" },
+    { id: "home_visits_count", label: "Visites" },
+  ];
+  const valeur = (id, champ) => {
+    if (saisie[id] && saisie[id][champ] !== undefined) return saisie[id][champ];
+    const l = lignes[id]; return l ? l[champ] : "";
+  };
+  const totalDe = (id) => (Number(valeur(id, "sunday_count")) || 0) + (Number(valeur(id, "visitors_count")) || 0);
+  const modifie = (id) => !!saisie[id];
+
+  async function enregistrer(b) {
+    const id = b.bethel_id;
+    const corps = { bethel_id: id, week_start_date: debut, week_end_date: fin, status: (saisie[id] && saisie[id].status) || (lignes[id] && lignes[id].status) || "On time" };
+    CHAMPS.forEach((c) => { corps[c.id] = Math.max(0, parseInt(valeur(id, c.id), 10) || 0); });
+    setEnCours(id);
+    try {
+      const existe = lignes[id];
+      const res = existe
+        ? await supaPatch("attendance", `id=eq.${existe.id}`, { ...corps, submitted_at: new Date().toISOString() })
+        : await supaPost("attendance", corps);
+      setLignes((l) => ({ ...l, [id]: res[0] }));
+      setSaisie((s) => { const n = { ...s }; delete n[id]; return n; });
+    } catch (e) { setMessage("⚠️ " + e.message); } finally { setEnCours(""); }
+  }
+
+  if (!bethels) return <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>{message || "Chargement…"}</div>;
+  const q = normaliseNom(recherche);
+  const visibles = bethels.filter((b) => {
+    if (q && !normaliseNom(`${b.leader_name || ""} ${b.hp_number} ${b.bethel_name_officiel || ""}`).includes(q)) return false;
+    if (filtre === "soumis") return !!lignes[b.bethel_id];
+    if (filtre === "manquants") return !lignes[b.bethel_id];
+    return true;
+  });
+  const soumis = bethels.filter((b) => lignes[b.bethel_id]).length;
+  const somme = (champ) => Object.values(lignes).reduce((a, l) => a + (Number(l[champ]) || 0), 0);
+  const btn = { padding: "6px 14px", borderRadius: "999px", fontSize: "12.5px", fontWeight: 600, cursor: "pointer", border: "1px solid var(--border)", background: "var(--surface)", color: "var(--ink)" };
+  const inp = { width: "62px", padding: "5px 6px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", textAlign: "right" };
+  const th = { textAlign: "left", padding: "9px 10px", color: "var(--ink-muted)", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.03em" };
+  return (
+    <div>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Présences</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>Campus: TG Montreal — présences hebdomadaires des Bethels.</p>
+      <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
+        <button style={btn} onClick={() => setLundi(new Date(lundi.getFullYear(), lundi.getMonth(), lundi.getDate() - 7))}>← Semaine précédente</button>
+        <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--ink)" }}>Semaine du {debut} au {fin}</div>
+        <button style={btn} onClick={() => setLundi(new Date(lundi.getFullYear(), lundi.getMonth(), lundi.getDate() + 7))}>Semaine suivante →</button>
+        <button style={btn} onClick={() => setLundi(lundiDe(new Date()))}>Cette semaine</button>
+      </div>
+      <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", marginBottom: "12px" }}>
+        {[["Bethels ayant soumis", `${soumis}/${bethels.length}`], ["Dimanche", somme("sunday_count")], ["Visiteurs", somme("visitors_count")], ["Total", somme("total_count")], ["Décisions", somme("decisions_count")], ["Visites à domicile", somme("home_visits_count")]].map(([l, v]) => (
+          <div key={l} style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 12px", background: "var(--surface)" }}>
+            <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase" }}>{l}</div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: "18px", color: "var(--ink)" }}>{v}</div>
+          </div>
+        ))}
+      </div>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px", alignItems: "center" }}>
+        <input value={recherche} onChange={(e) => setRecherche(e.target.value)} placeholder="Rechercher un leader ou un Bethel…" style={{ padding: "7px 10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13px", minWidth: "240px" }} />
+        {[["tous", "Tous"], ["soumis", "Soumis"], ["manquants", "Non soumis"]].map(([id, l]) => (
+          <button key={id} onClick={() => setFiltre(id)} style={{ ...btn, background: filtre === id ? "var(--plum)" : "var(--surface)", color: filtre === id ? "#fff" : "var(--ink-muted)" }}>{l}</button>
+        ))}
+      </div>
+      {message && <div style={{ fontSize: "12.5px", color: "var(--brick)", marginBottom: "10px" }}>{message}</div>}
+      <div style={{ border: "1px solid var(--border)", borderRadius: "10px", overflow: "auto", background: "var(--surface)" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "860px" }}>
+          <thead><tr style={{ background: "var(--bg)" }}>
+            <th style={th}>Bethel</th>
+            {CHAMPS.slice(0, 2).map((c) => <th key={c.id} style={th}>{c.label}</th>)}
+            <th style={th}>Total</th>
+            {CHAMPS.slice(2).map((c) => <th key={c.id} style={th}>{c.label}</th>)}
+            <th style={th}>Statut</th><th style={th}></th>
+          </tr></thead>
+          <tbody>
+            {visibles.map((b) => {
+              const id = b.bethel_id; const l = lignes[id];
+              return (
+                <tr key={id} style={{ borderTop: "1px solid var(--border)" }}>
+                  <td style={{ padding: "7px 10px", fontSize: "13px" }}>
+                    <div style={{ fontWeight: 600, color: "var(--ink)" }}>{b.leader_name || "—"}</div>
+                    <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{b.bethel_name_officiel || b.hp_number} · {zonesVille[b.zone_id] || ""}</div>
+                  </td>
+                  {CHAMPS.slice(0, 2).map((c) => (
+                    <td key={c.id} style={{ padding: "7px 6px" }}><input type="number" min="0" style={inp} value={valeur(id, c.id)} onChange={(e) => setSaisie((s) => ({ ...s, [id]: { ...(s[id] || {}), [c.id]: e.target.value } }))} /></td>
+                  ))}
+                  <td style={{ padding: "7px 10px", fontSize: "13px", fontWeight: 700 }}>{l || modifie(id) ? totalDe(id) : "—"}</td>
+                  {CHAMPS.slice(2).map((c) => (
+                    <td key={c.id} style={{ padding: "7px 6px" }}><input type="number" min="0" style={inp} value={valeur(id, c.id)} onChange={(e) => setSaisie((s) => ({ ...s, [id]: { ...(s[id] || {}), [c.id]: e.target.value } }))} /></td>
+                  ))}
+                  <td style={{ padding: "7px 6px" }}>
+                    <select value={(saisie[id] && saisie[id].status) || (l && l.status) || "On time"} onChange={(e) => setSaisie((s) => ({ ...s, [id]: { ...(s[id] || {}), status: e.target.value } }))} style={{ padding: "5px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12px" }}>
+                      <option>On time</option><option>Late</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: "7px 10px", whiteSpace: "nowrap" }}>
+                    <button disabled={enCours === id || (!modifie(id) && !!l)} onClick={() => enregistrer(b)} style={{ ...btn, padding: "5px 12px", background: modifie(id) || !l ? "var(--plum)" : "var(--surface)", color: modifie(id) || !l ? "#fff" : "var(--ink-muted)", opacity: enCours === id ? 0.5 : 1 }}>
+                      {enCours === id ? "…" : l && !modifie(id) ? "✓ Soumis" : "Enregistrer"}
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+            {visibles.length === 0 && <tr><td colSpan={9} style={{ padding: "14px", fontSize: "13px", color: "var(--ink-muted)" }}>Aucun Bethel.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 const NAV = [
   { id: "dashboard", label: "Tableau de bord", icon: Home },
   { id: "submissions", label: "Soumissions", icon: Inbox },
@@ -6194,6 +6350,7 @@ const NAV = [
   { id: "manage-members", label: "Gérer les membres", icon: Plus },
   { id: "search", label: "Recherche membres", icon: Search },
   { id: "devotions", label: "Dévotions", icon: BookOpen },
+  { id: "attendance", label: "Présences", icon: Check },
   { id: "reports", label: "Rapports", icon: BarChart3 },
   { id: "zones", label: "Recherche de zone", icon: MapPin },
 ];
@@ -7347,6 +7504,7 @@ function BethelAdminPortalInner() {
             {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
             {view === "devotions" && <DevotionsView />}
+            {view === "attendance" && <AttendanceView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} zones={zones} onChanged={loadAll} />}
             {view === "zones" && <ZoneLookupView zones={zones} />}
           </>
