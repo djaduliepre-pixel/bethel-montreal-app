@@ -2812,6 +2812,148 @@ function OrgChartView() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Objectif 31 octobre : 115 Bethels pleinement opérationnels.        */
+/* 7 étapes : 1 actif, 2 leader, 3 overseer, 5 membres (calculées) ;   */
+/* 4 accès app, 6 présence, 7 service (cochées à la main, table        */
+/* bethel_readiness). Lecture seule sur bethels / members.             */
+/* ------------------------------------------------------------------ */
+const OBJECTIF_BETHELS = 115;
+const ETAPES_PREPARATION = [
+  { n: 1, id: "actif", court: "Activés", label: "Bethel activé" },
+  { n: 2, id: "leader", court: "Leaders assignés", label: "Leader Bethel assigné" },
+  { n: 3, id: "overseer", court: "Superviseurs assignés", label: "Superviseur (Overseer) assigné" },
+  { n: 4, id: "app", court: "Accès app validé", label: "Accès à l'app TG Bethel validé", manuel: "app_access" },
+  { n: 5, id: "membres", court: "Avec membres", label: "Membres ajoutés" },
+  { n: 6, id: "presence", court: "Présence prête", label: "Présence prête", manuel: "presence_ready" },
+  { n: 7, id: "service", court: "Service prêt", label: "Service du dimanche prêt", manuel: "service_ready" },
+];
+
+function etapesBethel(b, membres, ready) {
+  const sansChef = ["", "membre", "new member", "nouveau potentiel"];
+  const nomLeader = (b.leader_name || "").trim();
+  const leader = !!nomLeader && !/^unassigned$/i.test(nomLeader) && !sansChef.includes((b.leader_role || "").trim().toLowerCase());
+  const overseer = membres.some((m) => (m.overseer_name || "").trim()) || ["overseer", "ministre ordonné"].includes((b.leader_role || "").trim().toLowerCase());
+  const r = ready || {};
+  const e = {
+    actif: b.status !== "inactive",
+    leader,
+    overseer,
+    app: !!r.app_access,
+    membres: membres.length > 0,
+    presence: !!r.presence_ready,
+    service: !!r.service_ready,
+  };
+  const faits = ETAPES_PREPARATION.filter((x) => e[x.id]).length;
+  const statut = faits === 7 ? "pret" : (!e.actif || !e.leader || !e.overseer) ? "bloque" : "en_cours";
+  return { ...e, faits, statut };
+}
+
+function usePreparationBethels(cleRecharge) {
+  const [etat, setEtat] = useState({ map: {}, charge: false, tableOk: true, erreur: "" });
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const [bets, mems, ready] = await Promise.all([
+          supaGetTout("bethels", "select=bethel_id,hp_number,bethel_name_officiel,status,leader_name,leader_role"),
+          supaGetTout("members", "status=eq.active&select=bethel_id,overseer_name"),
+          supaGetTout("bethel_readiness", "select=*").catch(() => null),
+        ]);
+        const membresParBethel = {};
+        mems.forEach((m) => { (membresParBethel[m.bethel_id] = membresParBethel[m.bethel_id] || []).push(m); });
+        const readyParId = Object.fromEntries((ready || []).map((r) => [r.bethel_id, r]));
+        const map = {};
+        bets.filter(estBethelOfficielLigne).forEach((b) => { map[b.bethel_id] = etapesBethel(b, membresParBethel[b.bethel_id] || [], readyParId[b.bethel_id]); });
+        if (!annule) setEtat({ map, charge: true, tableOk: ready !== null, erreur: "" });
+      } catch (e) { if (!annule) setEtat({ map: {}, charge: true, tableOk: true, erreur: e.message }); }
+    })();
+    return () => { annule = true; };
+  }, [cleRecharge]);
+  return etat;
+}
+
+function ObjectifOctobre() {
+  const { map, charge, tableOk, erreur } = usePreparationBethels(0);
+  const liste = Object.values(map);
+  const prets = liste.filter((x) => x.statut === "pret").length;
+  const pct = Math.min(100, Math.round((prets / OBJECTIF_BETHELS) * 100));
+  const joursRestants = Math.max(0, Math.ceil((new Date("2026-10-31T23:59:59-04:00") - new Date()) / 86400000));
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "12px", background: "var(--surface)", padding: "16px 18px", marginBottom: "22px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: "8px" }}>
+        <div style={{ fontFamily: "var(--font-display)", fontSize: "19px", color: "var(--ink)" }}>Objectif 31 Octobre : {OBJECTIF_BETHELS} Bethels Opérationnels</div>
+        <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>{joursRestants} jour{joursRestants > 1 ? "s" : ""} restant{joursRestants > 1 ? "s" : ""}</div>
+      </div>
+      {!charge ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "10px" }}>Chargement…</div> : erreur ? <div style={{ fontSize: "12.5px", color: "var(--brick)", marginTop: "10px" }}>Erreur : {erreur}</div> : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px", margin: "12px 0 14px" }}>
+            <div style={{ flex: 1, height: "12px", background: "var(--bg)", border: "1px solid var(--border)", borderRadius: "999px", overflow: "hidden" }}>
+              <div style={{ width: `${pct}%`, height: "100%", background: "var(--teal)", transition: "width .3s" }} />
+            </div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: "18px", color: "var(--teal)", whiteSpace: "nowrap" }}>{prets}/{OBJECTIF_BETHELS} · {pct}%</div>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: "8px" }}>
+            {ETAPES_PREPARATION.map((et) => {
+              const n = liste.filter((x) => x[et.id]).length;
+              return (
+                <div key={et.id} style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 10px", background: "var(--bg)" }}>
+                  <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase" }}>{et.n}. {et.court}</div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: "18px", color: "var(--ink)" }}>{n}<span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>/{OBJECTIF_BETHELS}</span></div>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "10px" }}>
+            {liste.length} Bethels officiels dans le système. Étapes 1, 2, 3 et 5 calculées automatiquement ; 4, 6 et 7 cochées par l'équipe admin dans la fiche du Bethel.
+            {!tableOk && " ⚠️ Table bethel_readiness introuvable : les étapes 4, 6 et 7 restent à 0."}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function ChecklistPreparation({ bethel, membres, onChange }) {
+  const [ready, setReady] = useState(undefined); // undefined = chargement, null = table absente
+  const [enCours, setEnCours] = useState("");
+  useEffect(() => {
+    setReady(undefined);
+    supaGet("bethel_readiness", `bethel_id=eq.${bethel.bethel_id}&select=*`).then((r) => setReady(r[0] || {})).catch(() => setReady(null));
+  }, [bethel.bethel_id]);
+  if (ready === undefined) return null;
+  const e = etapesBethel(bethel, membres, ready);
+  async function basculer(champ, valeur) {
+    setEnCours(champ);
+    try {
+      const corps = { [champ]: valeur, updated_at: new Date().toISOString() };
+      const existe = await supaGet("bethel_readiness", `bethel_id=eq.${bethel.bethel_id}&select=bethel_id`);
+      const res = existe.length ? await supaPatch("bethel_readiness", `bethel_id=eq.${bethel.bethel_id}`, corps) : await supaPost("bethel_readiness", { bethel_id: bethel.bethel_id, ...corps });
+      setReady(res[0] || { ...ready, ...corps });
+      onChange && onChange();
+    } catch (err) { alert("Erreur : " + err.message); } finally { setEnCours(""); }
+  }
+  const couleurs = { pret: "#1f7a45", en_cours: "var(--gold)", bloque: "var(--brick)" };
+  const libelle = { pret: "Prêt", en_cours: "En cours", bloque: "Bloqué" };
+  return (
+    <div style={{ marginTop: "14px", paddingTop: "10px", borderTop: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+        <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Checklist de préparation (7 étapes)</div>
+        <span style={{ fontSize: "11.5px", fontWeight: 700, color: couleurs[e.statut] }}>{e.faits}/7 · {libelle[e.statut]}</span>
+      </div>
+      {ETAPES_PREPARATION.map((et) => (
+        <label key={et.id} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "5px 0", fontSize: "13px", color: "var(--ink)", cursor: et.manuel && ready !== null ? "pointer" : "default" }}>
+          <input type="checkbox" checked={!!e[et.id]} disabled={!et.manuel || ready === null || enCours === et.manuel}
+            onChange={(ev) => et.manuel && basculer(et.manuel, ev.target.checked)} />
+          <span>{et.n}. {et.label}</span>
+          {!et.manuel && <span style={{ fontSize: "10.5px", color: "var(--ink-muted)" }}>(auto)</span>}
+        </label>
+      ))}
+      {ready === null && <div style={{ fontSize: "11.5px", color: "var(--brick)" }}>Table bethel_readiness introuvable : étapes 4, 6 et 7 désactivées.</div>}
+    </div>
+  );
+}
+
 function DashboardView({ submissions, bethels, zones, onNavigate }) {
   const pending = submissions.filter((s) => s.status === "pending").length;
   const willing = submissions.filter((s) => s.willing_to_host).length;
@@ -2827,6 +2969,7 @@ function DashboardView({ submissions, bethels, zones, onNavigate }) {
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 24px" }}>
         Live data from your Supabase database — bethel-montreal-app.
       </p>
+      <ObjectifOctobre />
       <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
         <StatCard label="Pending submissions" value={pending} sub="awaiting zone match" accent="var(--gold)" />
         <StatCard label="Active Bethels" value={bethels.length} sub="households running today" accent="var(--teal)" />
@@ -3177,6 +3320,7 @@ function DetailsBethelShekinah({ bethel, onReload }) {
         {ligne2("Leadership level", (sub && sub.leadership_level) || (hote && hote.role))}
         {ligne2("Approved at", sub && sub.status === "approved" ? dateCourte(sub.reviewed_at) : "")}
       </div>
+      <ChecklistPreparation bethel={bethel} membres={membres} />
     </div>
   );
 }
@@ -3454,6 +3598,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
   const [sousZoneChoisie, setSousZoneChoisie] = useState("all");
   const [panneau, setPanneau] = useState(null); // { mode, bethelId }
   const [enCours, setEnCours] = useState(null);
+  const prep = usePreparationBethels(bethels.length);
 
   // « En attente d'assignation » = Bethel actif sans responsable enregistré (aucun Bethel Leader).
   const sansResponsable = (b) => b.status !== "inactive" && !b.has_leader_member && (!b.leader_name || /^unassigned$/i.test(b.leader_name.trim()));
@@ -3467,7 +3612,11 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     { id: "needs_members", label: "Besoin de membres" },
     { id: "willing_yes", label: "Willing : Oui" },
     { id: "willing_no", label: "Willing : Non" },
+    { id: "prep_pret", label: "Prêts (7/7)" },
+    { id: "prep_cours", label: "En cours" },
+    { id: "prep_bloque", label: "Bloqués" },
   ];
+  const statutPrep = (b) => (prep.map[b.bethel_id] || {}).statut;
 
   const villes = useMemo(() => {
     const compteurs = {};
@@ -3496,6 +3645,9 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     if (filtre === "needs_members") liste = liste.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3);
     if (filtre === "willing_yes") liste = liste.filter((b) => b.leader_willing_to_host === true);
     if (filtre === "willing_no") liste = liste.filter((b) => b.leader_willing_to_host === false);
+    if (filtre === "prep_pret") liste = liste.filter((b) => statutPrep(b) === "pret");
+    if (filtre === "prep_cours") liste = liste.filter((b) => statutPrep(b) === "en_cours");
+    if (filtre === "prep_bloque") liste = liste.filter((b) => statutPrep(b) === "bloque");
     if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
     if (sousZoneChoisie !== "all") liste = liste.filter((b) => b.zone_name === sousZoneChoisie);
     const q = normaliseNom(recherche);
@@ -3505,7 +3657,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
       );
     }
     return liste;
-  }, [bethels, memberCounts, filtre, recherche, villeChoisie, sousZoneChoisie]);
+  }, [bethels, memberCounts, filtre, recherche, villeChoisie, sousZoneChoisie, prep.map]);
 
   const compteFiltre = (id) => {
     if (id === "all") return bethels.length;
@@ -3514,6 +3666,9 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     if (id === "inactive") return bethels.filter((b) => b.status === "inactive").length;
     if (id === "willing_yes") return bethels.filter((b) => b.leader_willing_to_host === true).length;
     if (id === "willing_no") return bethels.filter((b) => b.leader_willing_to_host === false).length;
+    if (id === "prep_pret") return bethels.filter((b) => statutPrep(b) === "pret").length;
+    if (id === "prep_cours") return bethels.filter((b) => statutPrep(b) === "en_cours").length;
+    if (id === "prep_bloque") return bethels.filter((b) => statutPrep(b) === "bloque").length;
     return bethels.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3).length;
   };
 
