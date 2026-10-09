@@ -5344,12 +5344,13 @@ function JumelageView({ zones, onChanged }) {
   const [message, setMessage] = useState("");
 
   async function charger() {
-    const [mem, bet, subs] = await Promise.all([
+    const [mem, bet, subs, feuille] = await Promise.all([
       supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,address,postal_code,willing_to_host,bethel_id,overseer_name,ordained_minister_name"),
-      supaGetTout("bethels", "select=bethel_id,hp_number,bethel_name_officiel,status,zone_id,campus_id,leader_name"),
+      supaGetTout("bethels", "select=bethel_id,hp_number,bethel_name_officiel,status,zone_id,campus_id,leader_name,host_name"),
       supaGetTout("submissions", "select=submission_id,first_name,last_name,phone,address,campus_id,willing_to_host,leadership_level,status,zone_id,submitted_at&order=submitted_at.desc"),
+      supaGetTout("supervision_sheet", "actif=eq.true&select=l_prenom,l_nom,l_adresse,n_bethel").catch(() => []),
     ]);
-    setDonnees({ mem, bet, subs });
+    setDonnees({ mem, bet, subs, feuille });
   }
   useEffect(() => { charger().catch((e) => setMessage("Erreur de chargement : " + e.message)); /* eslint-disable-next-line */ }, []);
 
@@ -5357,9 +5358,27 @@ function JumelageView({ zones, onChanged }) {
 
   const analyse = useMemo(() => {
     if (!donnees) return null;
-    const { mem, bet, subs } = donnees;
+    const { mem, bet, subs, feuille } = donnees;
     const betParId = Object.fromEntries(bet.map((b) => [b.bethel_id, b]));
     const cle = (p) => normaliseNom(`${p.first_name} ${p.last_name}`);
+    // Clé d'adresse : numéro civique + premier mot significatif de la rue (ex. « 5555|henri »).
+    const MOTS_VIDES = new Set(["rue", "boul", "boulevard", "bd", "avenue", "ave", "av", "chemin", "ch", "de", "du", "des", "la", "le", "les", "d", "l", "app", "apt", "appartement"]);
+    const cleAdresse = (a) => {
+      const mots = normaliseNom(String(a || "")).replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean);
+      const num = mots.find((w) => /^\d+[a-z]?$/.test(w));
+      if (!num) return "";
+      const rue = mots.slice(mots.indexOf(num) + 1).find((w) => !MOTS_VIDES.has(w) && !/^\d/.test(w));
+      return rue ? `${num}|${rue}` : "";
+    };
+    // Le Google Sheet : l'adresse du leader y est celle du membre qui reçoit.
+    const leadersFeuille = new Set(); const adressesPrises = {};
+    (feuille || []).forEach((r) => {
+      const k = normaliseNom(`${r.l_prenom || ""} ${r.l_nom || ""}`); const ka = cleAdresse(r.l_adresse);
+      if (!k || !ka) return;
+      leadersFeuille.add(k);
+      (adressesPrises[ka] = adressesPrises[ka] || []).push({ k, n: r.n_bethel });
+    });
+    const deja = { chefs: 0, hotes: 0 };
     const subParCle = {};
     subs.forEach((x) => { const k = cle(x); if (!subParCle[k]) subParCle[k] = x; }); // la plus récente d'abord
     const ville_de = (p, k) => {
@@ -5378,9 +5397,14 @@ function JumelageView({ zones, onChanged }) {
       if (!v) return;
       if (ROLES_PEUVENT_DIRIGER.includes(m.role)) {
         const dirigeDeja = b && b.status !== "inactive" && estBethelOfficielLigne(b) && normaliseNom(b.leader_name || "") === k;
-        if (veutRecevoir === false && !dirigeDeja) chefs.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "" });
+        if (veutRecevoir === false && (dirigeDeja || leadersFeuille.has(k))) deja.chefs++;
+        else if (veutRecevoir === false) chefs.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "" });
       } else if (veutRecevoir === true) {
-        hotes.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "", adresse: m.address || (sb && sb.address) || "" });
+        const adr = m.address || (sb && sb.address) || "";
+        const prisPar = (adressesPrises[cleAdresse(adr)] || []).filter((x) => x.k !== k);
+        const hoteDe = bet.find((x) => x.status !== "inactive" && normaliseNom(x.host_name || "") === k && normaliseNom(x.leader_name || "") !== k);
+        if (prisPar.length || hoteDe) deja.hotes++;
+        else hotes.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "", adresse: adr });
       }
     });
     // Hôtes « Oui » qui n'ont encore aucune fiche membre (soumissions en attente)
@@ -5388,10 +5412,11 @@ function JumelageView({ zones, onChanged }) {
     subs.forEach((x) => {
       const k = cle(x); if (vusSub.has(k)) return; vusSub.add(k);
       if (vus.has(k) || x.status !== "pending" || x.willing_to_host !== true || !x.zone_id) return;
+      if ((adressesPrises[cleAdresse(x.address)] || []).some((y) => y.k !== k)) { deja.hotes++; return; }
       hotes.push({ cle: k, type: "submission", sub: x, ville: villeDeZone[x.zone_id] || "", origine: "HP churches (réponses)", adresse: x.address || "" });
     });
     const villes = [...new Set([...chefs, ...hotes].map((x) => x.ville).filter(Boolean))].sort();
-    return { chefs, hotes, villes, betParId, subParCle };
+    return { chefs, hotes, villes, betParId, subParCle, deja };
   }, [donnees, villeDeZone]);
 
   const chef = analyse && analyse.chefs.find((c) => c.cle === chefCle && c.ville === ville);
@@ -5506,6 +5531,10 @@ function JumelageView({ zones, onChanged }) {
           <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
             {colonne("Leaders « Non »", chefsVille, chefCle, setChefCle, "var(--brick)")}
             {colonne("Hôtes « Oui »", hotesVille, hoteCle, setHoteCle, "var(--teal)")}
+          </div>
+          <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "12px" }}>
+            Les leaders et les hôtes déjà placés selon le Google Sheet (adresse du leader = adresse de l'hôte) ne sont pas proposés
+            ({analyse.deja.chefs} leaders et {analyse.deja.hotes} hôtes masqués au total).
           </div>
           {chef && hote && (
             <div style={{ border: "1px solid var(--plum)", borderRadius: "10px", padding: "14px", background: "var(--surface)", maxWidth: "520px" }}>
