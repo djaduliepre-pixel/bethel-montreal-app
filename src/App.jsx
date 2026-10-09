@@ -5550,7 +5550,7 @@ function JumelageView({ zones, onChanged }) {
       const b = betParId[p.bethel_id];
       return zSub || (b && villeDeZone[b.zone_id]) || "";
     };
-    const chefs = []; const hotes = []; const vus = new Set();
+    const chefs = []; const hotes = []; const vus = new Set(); const chefsMasques = [];
     mem.forEach((m) => {
       const k = cle(m); if (vus.has(k)) return; vus.add(k);
       const sb = subParCle[k];
@@ -5560,7 +5560,10 @@ function JumelageView({ zones, onChanged }) {
       if (!v) return;
       if (ROLES_PEUVENT_DIRIGER.includes(m.role)) {
         const dirigeDeja = b && b.status !== "inactive" && estBethelOfficielLigne(b) && normaliseNom(b.leader_name || "") === k;
-        if (veutRecevoir === false && (dirigeDeja || leadersFeuille.has(k))) deja.chefs++;
+        if (veutRecevoir === false && (dirigeDeja || leadersFeuille.has(k))) {
+          deja.chefs++;
+          chefsMasques.push({ cle: k, m, ville: v, origine: b ? (b.bethel_name_officiel || b.hp_number) : "", raison: dirigeDeja ? "dirige déjà un Bethel officiel" : "déjà placé selon le Google Sheet" });
+        }
         else if (veutRecevoir === false) chefs.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "" });
       } else if (veutRecevoir === true) {
         const adr = m.address || (sb && sb.address) || "";
@@ -5582,7 +5585,7 @@ function JumelageView({ zones, onChanged }) {
       hotes.push({ cle: k, type: "submission", sub: x, ville: villeDeZone[x.zone_id] || "", origine: "HP churches (réponses)", adresse: x.address || "" });
     });
     const villes = [...new Set([...chefs, ...hotes].map((x) => x.ville).filter(Boolean))].sort();
-    return { chefs, hotes, villes, betParId, subParCle, deja };
+    return { chefs, hotes, villes, betParId, subParCle, deja, chefsMasques };
   }, [donnees, villeDeZone]);
 
   const chef = analyse && analyse.chefs.find((c) => c.cle === chefCle && c.ville === ville);
@@ -5704,6 +5707,18 @@ function JumelageView({ zones, onChanged }) {
             Une maison dont l'adresse est déjà celle d'un Bethel officiel actif n'est pas reproposée.
             {analyse.deja.horsVille > 0 && ` ${analyse.deja.horsVille} hôte(s) masqué(s) : adresse hors de la ville (code postal d'une autre région).`}
           </div>
+          {analyse.chefsMasques.filter((c) => c.ville === ville).length > 0 && (
+            <details style={{ marginBottom: "12px", fontSize: "12.5px" }}>
+              <summary style={{ cursor: "pointer", color: "var(--ink-muted)" }}>
+                Leaders « Non » déjà placés dans cette ville ({analyse.chefsMasques.filter((c) => c.ville === ville).length})
+              </summary>
+              {analyse.chefsMasques.filter((c) => c.ville === ville).map((c) => (
+                <div key={c.cle} style={{ padding: "4px 0", borderBottom: "1px solid var(--border)" }}>
+                  <b>{c.m.first_name} {c.m.last_name}</b> · {c.m.role} · {c.origine} — <span style={{ color: "var(--ink-muted)" }}>{c.raison}</span>
+                </div>
+              ))}
+            </details>
+          )}
           {chef && hote && (
             <div style={{ border: "1px solid var(--plum)", borderRadius: "10px", padding: "14px", background: "var(--surface)", maxWidth: "520px" }}>
               <div style={{ fontSize: "13px", fontWeight: 700, marginBottom: "8px", color: "var(--ink)" }}>
