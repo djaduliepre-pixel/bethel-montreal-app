@@ -2821,14 +2821,23 @@ function OrgChartView() {
 /* ------------------------------------------------------------------ */
 const OBJECTIF_BETHELS = 115;
 const ETAPES_PREPARATION = [
-  { n: 1, id: "actif", court: "Activés", label: "Bethel activé" },
-  { n: 2, id: "leader", court: "Leaders assignés", label: "Leader Bethel assigné" },
-  { n: 3, id: "overseer", court: "Superviseurs assignés", label: "Superviseur (Overseer) assigné" },
-  { n: 4, id: "app", court: "Accès app validé", label: "Accès à l'app TG Bethel validé", manuel: "app_access" },
-  { n: 5, id: "membres", court: "Avec membres", label: "Membres ajoutés" },
-  { n: 6, id: "presence", court: "Présence prête", label: "Présence prête", manuel: "presence_ready" },
-  { n: 7, id: "service", court: "Service prêt", label: "Service du dimanche prêt", manuel: "service_ready" },
+  { n: 1, id: "actif", admin: 1, court: "Activés", label: "Bethel activé" },
+  { n: 2, id: "leader", admin: 1, court: "Leaders assignés", label: "Leader Bethel assigné" },
+  { n: 3, id: "overseer", admin: 3, court: "Superviseurs assignés", label: "Superviseur (Overseer) assigné" },
+  { n: 4, id: "app", admin: 2, court: "Accès app validé", label: "Accès à l'app TG Bethel validé", manuel: "app_access" },
+  { n: 5, id: "membres", admin: 1, court: "Avec membres", label: "Membres ajoutés" },
+  { n: 6, id: "presence", admin: 3, court: "Présence prête", label: "Présence prête", manuel: "presence_ready" },
+  { n: 7, id: "service", admin: 2, court: "Service prêt", label: "Service du dimanche prêt", manuel: "service_ready" },
 ];
+
+// Répartition des responsabilités (infographie des 115 Bethels)
+const ADMINS = [
+  { n: 1, nom: "Admin 1", vue: "Vue Admin 1 : Intégration", desc: "activation, leader, membres", etapes: "1, 2, 5", filtre: (x) => !x.actif || !x.leader || !x.membres },
+  { n: 2, nom: "Admin 2", vue: "Vue Admin 2 : Accès & Service", desc: "accès app, service du dimanche", etapes: "4, 7", filtre: (x) => !x.app || !x.service },
+  { n: 3, nom: "Admin 3", vue: "Vue Admin 3 : Rapports & Présences", desc: "superviseur, présences", etapes: "3, 6", filtre: (x) => !x.overseer || !x.rapport },
+];
+const COULEURS_ADMIN = { 1: "var(--teal)", 2: "var(--plum)", 3: "var(--gold)" };
+let FILTRE_BETHELS_INITIAL = null; // posé par le tableau de bord avant de naviguer vers Bethels
 
 function etapesBethel(b, membres, ready) {
   const sansChef = ["", "membre", "new member", "nouveau potentiel"];
@@ -2856,16 +2865,18 @@ function usePreparationBethels(cleRecharge) {
     let annule = false;
     (async () => {
       try {
-        const [bets, mems, ready] = await Promise.all([
+        const [bets, mems, ready, presences] = await Promise.all([
           supaGetTout("bethels", "select=bethel_id,hp_number,bethel_name_officiel,status,leader_name,leader_role"),
           supaGetTout("members", "status=eq.active&select=bethel_id,overseer_name"),
           supaGetTout("bethel_readiness", "select=*").catch(() => null),
+          supaGetTout("attendance", `week_start_date=eq.${dateIso(lundiDe(new Date()))}&select=bethel_id`).catch(() => []),
         ]);
+        const rapports = new Set(presences.map((x) => x.bethel_id));
         const membresParBethel = {};
         mems.forEach((m) => { (membresParBethel[m.bethel_id] = membresParBethel[m.bethel_id] || []).push(m); });
         const readyParId = Object.fromEntries((ready || []).map((r) => [r.bethel_id, r]));
         const map = {};
-        bets.filter(estBethelOfficielLigne).forEach((b) => { map[b.bethel_id] = etapesBethel(b, membresParBethel[b.bethel_id] || [], readyParId[b.bethel_id]); });
+        bets.filter(estBethelOfficielLigne).forEach((b) => { map[b.bethel_id] = { ...etapesBethel(b, membresParBethel[b.bethel_id] || [], readyParId[b.bethel_id]), rapport: rapports.has(b.bethel_id) }; });
         if (!annule) setEtat({ map, charge: true, tableOk: ready !== null, erreur: "" });
       } catch (e) { if (!annule) setEtat({ map: {}, charge: true, tableOk: true, erreur: e.message }); }
     })();
@@ -2874,7 +2885,7 @@ function usePreparationBethels(cleRecharge) {
   return etat;
 }
 
-function ObjectifOctobre() {
+function ObjectifOctobre({ onNavigate }) {
   const { map, charge, tableOk, erreur } = usePreparationBethels(0);
   const liste = Object.values(map);
   const prets = liste.filter((x) => x.statut === "pret").length;
@@ -2902,6 +2913,20 @@ function ObjectifOctobre() {
                   <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase" }}>{et.n}. {et.court}</div>
                   <div style={{ fontFamily: "var(--font-display)", fontSize: "18px", color: "var(--ink)" }}>{n}<span style={{ fontSize: "12px", color: "var(--ink-muted)" }}>/{OBJECTIF_BETHELS}</span></div>
                 </div>
+              );
+            })}
+          </div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "16px 0 6px" }}>À traiter par responsable</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: "8px" }}>
+            {ADMINS.map((ad) => {
+              const n = liste.filter(ad.filtre).length;
+              return (
+                <button key={ad.n} onClick={() => { FILTRE_BETHELS_INITIAL = `admin${ad.n}`; onNavigate && onNavigate("bethels"); }}
+                  style={{ textAlign: "left", cursor: "pointer", border: `1px solid ${COULEURS_ADMIN[ad.n]}`, borderRadius: "8px", padding: "10px 12px", background: "var(--surface)", fontFamily: "var(--font-body)" }}>
+                  <div style={{ fontSize: "12.5px", fontWeight: 700, color: COULEURS_ADMIN[ad.n] }}>{ad.vue}</div>
+                  <div style={{ fontFamily: "var(--font-display)", fontSize: "20px", color: "var(--ink)" }}>{n}<span style={{ fontSize: "12px", color: "var(--ink-muted)" }}> Bethels à traiter</span></div>
+                  <div style={{ fontSize: "11px", color: "var(--ink-muted)" }}>Étapes {ad.etapes} · {ad.desc}</div>
+                </button>
               );
             })}
           </div>
@@ -2947,6 +2972,7 @@ function ChecklistPreparation({ bethel, membres, onChange }) {
           <input type="checkbox" checked={!!e[et.id]} disabled={!et.manuel || ready === null || enCours === et.manuel}
             onChange={(ev) => et.manuel && basculer(et.manuel, ev.target.checked)} />
           <span>{et.n}. {et.label}</span>
+          <span style={{ fontSize: "10px", fontWeight: 700, padding: "1px 7px", borderRadius: "999px", color: "#fff", background: COULEURS_ADMIN[et.admin] }}>Admin {et.admin}</span>
           {!et.manuel && <span style={{ fontSize: "10.5px", color: "var(--ink-muted)" }}>(auto)</span>}
         </label>
       ))}
@@ -2970,7 +2996,7 @@ function DashboardView({ submissions, bethels, zones, onNavigate }) {
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 24px" }}>
         Live data from your Supabase database — bethel-montreal-app.
       </p>
-      <ObjectifOctobre />
+      <ObjectifOctobre onNavigate={onNavigate} />
       <div style={{ display: "flex", gap: "14px", flexWrap: "wrap" }}>
         <StatCard label="Pending submissions" value={pending} sub="awaiting zone match" accent="var(--gold)" />
         <StatCard label="Active Bethels" value={bethels.length} sub="households running today" accent="var(--teal)" />
@@ -3602,7 +3628,7 @@ function EnAttenteDeVille({ ville }) {
 
 function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
   const [recherche, setRecherche] = useState("");
-  const [filtre, setFiltre] = useState("all");
+  const [filtre, setFiltre] = useState(() => { const f = FILTRE_BETHELS_INITIAL || "all"; FILTRE_BETHELS_INITIAL = null; return f; });
   const [villeChoisie, setVilleChoisie] = useState("all");
   const [sousZoneChoisie, setSousZoneChoisie] = useState("all");
   const [panneau, setPanneau] = useState(null); // { mode, bethelId }
@@ -3624,6 +3650,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     { id: "prep_pret", label: "Prêts (7/7)" },
     { id: "prep_cours", label: "En cours" },
     { id: "prep_bloque", label: "Bloqués" },
+    ...ADMINS.map((ad) => ({ id: `admin${ad.n}`, label: ad.vue })),
   ];
   const statutPrep = (b) => (prep.map[b.bethel_id] || {}).statut;
 
@@ -3657,6 +3684,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     if (filtre === "prep_pret") liste = liste.filter((b) => statutPrep(b) === "pret");
     if (filtre === "prep_cours") liste = liste.filter((b) => statutPrep(b) === "en_cours");
     if (filtre === "prep_bloque") liste = liste.filter((b) => statutPrep(b) === "bloque");
+    if (/^admin\d$/.test(filtre)) { const ad = ADMINS[Number(filtre.slice(5)) - 1]; liste = liste.filter((b) => prep.map[b.bethel_id] && ad.filtre(prep.map[b.bethel_id])); }
     if (villeChoisie !== "all") liste = liste.filter((b) => (b.city_name || b.zone_name) === villeChoisie);
     if (sousZoneChoisie !== "all") liste = liste.filter((b) => b.zone_name === sousZoneChoisie);
     const q = normaliseNom(recherche);
@@ -3678,6 +3706,7 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
     if (id === "prep_pret") return bethels.filter((b) => statutPrep(b) === "pret").length;
     if (id === "prep_cours") return bethels.filter((b) => statutPrep(b) === "en_cours").length;
     if (id === "prep_bloque") return bethels.filter((b) => statutPrep(b) === "bloque").length;
+    if (/^admin\d$/.test(id)) { const ad = ADMINS[Number(id.slice(5)) - 1]; return bethels.filter((b) => prep.map[b.bethel_id] && ad.filtre(prep.map[b.bethel_id])).length; }
     return bethels.filter((b) => b.status !== "inactive" && (memberCounts[b.bethel_id] || 0) < 3).length;
   };
 
