@@ -3027,6 +3027,156 @@ function SubmissionsView({ submissions, onOpenActivate, onOpenAssign, onAddNew }
 /* ------------------------------------------------------------------ */
 const estBethelOfficielLigne = (b) => !!b.bethel_name_officiel || /^bethel-.+-\d{6}$/i.test(b.hp_number || "");
 
+/* ------------------------------------------------------------------ */
+/* Onglet « Details » du panneau d'un Bethel (comme le portail         */
+/* Shekinah) : infos du Bethel, origine HP, assignation du leader.    */
+/* Lecture dans bethels / members / submissions ; l'assignation ne     */
+/* supprime rien et refuse de mettre deux leaders dans un Bethel.      */
+/* ------------------------------------------------------------------ */
+function DetailsBethelShekinah({ bethel, onReload }) {
+  const [info, setInfo] = useState(null);
+  const [choix, setChoix] = useState(false);
+  const [candidats, setCandidats] = useState(null);
+  const [candId, setCandId] = useState("");
+  const [msg, setMsg] = useState("");
+  const [enCours, setEnCours] = useState(false);
+  const ROLES_SANS_CHEF = ["", "Membre", "New member", "Nouveau Potentiel"];
+  const dateCourte = (d) => (d ? new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "—");
+
+  async function charger() {
+    const [zones, campus, membres, subs] = await Promise.all([
+      bethel.zone_id ? supaGet("data_zones", `zone_id=eq.${bethel.zone_id}&select=zone_code,city_code,city_name,zone_name`).catch(() => []) : [],
+      bethel.campus_id ? supaGet("campuses", `campus_id=eq.${bethel.campus_id}&select=campus_name`).catch(() => []) : [],
+      supaGet("members", `bethel_id=eq.${bethel.bethel_id}&status=eq.active&select=member_id,first_name,last_name,phone,email,address,role,willing_to_host,ananias_name,overseer_name,ordained_minister_name`).catch(() => []),
+      supaGetTout("submissions", "select=first_name,last_name,leadership_level,willing_to_host,status,submitted_at,reviewed_at&order=submitted_at.desc").catch(() => []),
+    ]);
+    const cle = (p) => normaliseNom(`${p.first_name || ""} ${p.last_name || ""}`);
+    const chefNom = ROLES_SANS_CHEF.includes(bethel.leader_role || "") ? "" : normaliseNom(bethel.leader_name || "");
+    const hoteNom = normaliseNom(bethel.host_name || bethel.leader_name || "");
+    const chef = chefNom ? membres.find((m) => cle(m) === chefNom) || null : null;
+    const hote = membres.find((m) => cle(m) === hoteNom && !ROLES_PEUVENT_DIRIGER.includes(m.role)) || membres.find((m) => cle(m) === hoteNom) || null;
+    const sub = hote ? subs.find((s) => cle(s) === cle(hote)) : subs.find((s) => cle(s) === hoteNom);
+    setInfo({ zone: zones[0] || null, campus: (campus[0] || {}).campus_name || "", membres, chef, hote, sub, aChef: !!chefNom });
+  }
+  useEffect(() => { setInfo(null); setChoix(false); setMsg(""); charger().catch((e) => setMsg("Erreur : " + e.message)); /* eslint-disable-next-line */ }, [bethel.bethel_id, bethel.leader_name]);
+
+  async function ouvrirChoix() {
+    setChoix(true); setMsg(""); setCandidats(null);
+    try {
+      const villeNom = info && info.zone ? info.zone.city_name : "";
+      const zonesVille = villeNom ? await supaGet("data_zones", `city_name=eq.${encodeURIComponent(villeNom)}&select=zone_id`) : [];
+      const idsZones = new Set(zonesVille.map((z) => z.zone_id));
+      const [bets, chefs] = await Promise.all([
+        supaGetTout("bethels", "status=eq.active&select=bethel_id,hp_number,bethel_name_officiel,zone_id,leader_name"),
+        supaGetTout("members", "status=eq.active&role=in.(%22Ananias%22,%22Bethel%20Leader%22)&select=member_id,first_name,last_name,phone,role,bethel_id"),
+      ]);
+      const betParId = Object.fromEntries(bets.map((b) => [b.bethel_id, b]));
+      const liste = chefs.filter((m) => {
+        const b = betParId[m.bethel_id];
+        if (!b || b.bethel_id === bethel.bethel_id || !idsZones.has(b.zone_id)) return false;
+        const dirigeOfficiel = estBethelOfficielLigne(b) && normaliseNom(b.leader_name || "") === normaliseNom(`${m.first_name} ${m.last_name}`);
+        return !dirigeOfficiel; // un leader qui dirige déjà un Bethel officiel n'est pas proposé
+      }).map((m) => ({ ...m, origine: (betParId[m.bethel_id] || {}).hp_number || "" }));
+      const vus = new Set();
+      setCandidats(liste.filter((m) => { const k = normaliseNom(`${m.first_name} ${m.last_name}`); if (vus.has(k)) return false; vus.add(k); return true; }));
+    } catch (e) { setMsg("Erreur : " + e.message); setCandidats([]); }
+  }
+
+  async function assigner() {
+    const c = (candidats || []).find((x) => x.member_id === candId); if (!c || !info) return;
+    const nom = `${c.first_name} ${c.last_name}`.trim();
+    const autres = info.membres.filter((m) => ROLES_PEUVENT_DIRIGER.includes(m.role) && normaliseNom(`${m.first_name} ${m.last_name}`) !== normaliseNom(nom));
+    if (autres.length) { setMsg(`⚠️ Deux leaders ne peuvent pas cohabiter : ${autres.map((m) => `${m.first_name} ${m.last_name}`).join(", ")} est déjà leader de ce Bethel. Déplacez-le d'abord.`); return; }
+    if (!window.confirm(`Assigner ${nom} (${c.role}) comme leader de ${bethel.bethel_name_officiel || bethel.hp_number} ?\n\nAucun groupe ne sera supprimé.`)) return;
+    setEnCours(true); setMsg("");
+    let etape = "début";
+    try {
+      etape = "chaîne de supervision";
+      const chaine = await chaineSupervisionDuBethel(bethel.bethel_id);
+      const nouvelle = { ...chaine, ...(c.role === "Ananias" ? { ananias_name: nom } : { bethel_leader_name: nom }) };
+      etape = "mise à jour du Bethel";
+      await supaPatch("bethels", `bethel_id=eq.${bethel.bethel_id}`, { leader_name: nom, leader_role: c.role });
+      etape = "déplacement du leader";
+      const ancienId = c.bethel_id;
+      await supaPatch("members", `member_id=eq.${c.member_id}`, { bethel_id: bethel.bethel_id, ...nouvelle });
+      etape = "ancien groupe du leader";
+      const anciens = await supaGet("bethels", `bethel_id=eq.${ancienId}&select=bethel_id,hp_number,bethel_name_officiel,status`);
+      if (anciens[0] && anciens[0].status !== "inactive" && !estBethelOfficielLigne(anciens[0])) {
+        const reste = await supaGet("members", `bethel_id=eq.${ancienId}&status=eq.active&select=member_id`);
+        if (reste.length === 0) await supaPatch("bethels", `bethel_id=eq.${ancienId}`, { status: "inactive" });
+      }
+      setMsg(`✅ ${nom} est maintenant leader de ce Bethel.`);
+      setChoix(false); setCandId("");
+      onReload && onReload();
+    } catch (e) { setMsg(`⚠️ Échec à l'étape « ${etape} » : ${e.message}`); }
+    finally { setEnCours(false); }
+  }
+
+  const ligne2 = (label, val, mono) => (
+    <div style={{ padding: "6px 0" }}>
+      <div style={{ fontSize: "10.5px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</div>
+      <div style={{ fontSize: "13px", color: "var(--ink)", fontWeight: 600, fontFamily: mono ? "var(--font-mono)" : undefined, wordBreak: "break-word" }}>{val || "—"}</div>
+    </div>
+  );
+  const grille = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 14px" };
+  if (!info) return <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>{msg || "Chargement des détails…"}</div>;
+  const { zone, campus, membres, chef, hote, sub, aChef } = info;
+  const btn = { padding: "7px 14px", borderRadius: "999px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12.5px", fontWeight: 600, cursor: "pointer" };
+  return (
+    <div>
+      <div style={{ display: "inline-block", padding: "2px 10px", borderRadius: "999px", fontSize: "12px", fontWeight: 600,
+        background: bethel.status === "inactive" ? "rgba(150,150,150,0.15)" : "rgba(40,160,90,0.14)", color: bethel.status === "inactive" ? "var(--ink-muted)" : "#1f7a45", marginBottom: "6px" }}>
+        {bethel.status === "inactive" ? "Inactive" : "Active"}
+      </div>
+      <div style={grille}>
+        {ligne2("Church ID", bethel.church_id || bethel.hp_number, true)}
+        {ligne2("Zone code", zone ? (zone.zone_code || zone.city_code) : "")}
+        {ligne2("Campus", campus)}
+        {ligne2("Leader", aChef ? bethel.leader_name : "—")}
+        {ligne2("Leader email", chef && chef.email)}
+        {ligne2("Members", String(membres.length))}
+        {ligne2("Activated", "—")}
+        {ligne2("Created", dateCourte(bethel.created_at))}
+      </div>
+      <button onClick={() => (choix ? setChoix(false) : ouvrirChoix())} style={{ ...btn, margin: "8px 0 4px" }}>{aChef ? "Edit Leader" : "Assign Leader"}</button>
+      {choix && (
+        <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "10px", margin: "6px 0 8px", background: "var(--bg)" }}>
+          <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "6px" }}>
+            Ananias / Bethel Leader de la même ville ({zone ? zone.city_name : "—"}) qui ne dirigent pas déjà un Bethel officiel.
+          </div>
+          {candidats === null ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Chargement…</div>
+            : candidats.length === 0 ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Aucun leader disponible dans cette ville.</div>
+            : (
+              <>
+                <select value={candId} onChange={(e) => setCandId(e.target.value)} style={{ width: "100%", padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px" }}>
+                  <option value="">Choisir un leader…</option>
+                  {candidats.map((c) => <option key={c.member_id} value={c.member_id}>{c.first_name} {c.last_name} · {c.role}{c.origine ? ` (${c.origine})` : ""}</option>)}
+                </select>
+                <button disabled={!candId || enCours} onClick={assigner} style={{ ...btn, marginTop: "8px", background: "var(--plum)", color: "#fff", border: "none", opacity: !candId || enCours ? 0.5 : 1 }}>
+                  {enCours ? "En cours…" : "Confirmer"}
+                </button>
+              </>
+            )}
+        </div>
+      )}
+      {msg && <div style={{ fontSize: "12px", margin: "6px 0", color: msg.startsWith("✅") ? "#1f7a45" : "var(--brick)" }}>{msg}</div>}
+
+      <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 2px", paddingTop: "10px", borderTop: "1px solid var(--border)" }}>HP origin</div>
+      <div style={grille}>
+        {ligne2("Applicant name", hote ? `${hote.first_name} ${hote.last_name}` : bethel.host_name)}
+        {ligne2("Email", hote && hote.email)}
+        {ligne2("Phone", hote && hote.phone)}
+        {ligne2("HP group", bethel.hp_number, true)}
+        {ligne2("HP facilitator", hote && (hote.overseer_name || hote.ananias_name))}
+        {ligne2("Willing to host", hote ? (hote.willing_to_host ? "Oui" : "Non") : (sub ? (sub.willing_to_host ? "Oui" : "Non") : ""))}
+        {ligne2("Address", bethel.address || (hote && hote.address))}
+        {ligne2("Leadership level", (sub && sub.leadership_level) || (hote && hote.role))}
+        {ligne2("Approved at", sub && sub.status === "approved" ? dateCourte(sub.reviewed_at) : "")}
+      </div>
+    </div>
+  );
+}
+
 function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetail }) {
   const [membres, setMembres] = useState([]);
   const [chargement, setChargement] = useState(false);
@@ -3125,13 +3275,7 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
 
         {mode === "voir" && (
           <>
-            {ligne("Code Bethel (Church ID)", bethel.church_id || bethel.hp_number)}
-            {ligne("Ancien code (hp_number)", bethel.hp_number)}
-            {ligne("Responsable", bethel.leader_full_name || bethel.leader_name)}
-            {ligne("Courriel", bethel.leader_email)}
-            {ligne("Zone", bethel.zone_name)}
-            {ligne("Adresse", bethel.address)}
-            {ligne("Statut", bethel.status === "inactive" ? "Inactif" : "Actif")}
+            <DetailsBethelShekinah bethel={bethel} onReload={() => { chargerMembres(); onReload(); }} />
             <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", margin: "16px 0 6px" }}>
               Membres ({membres.length})
             </div>
