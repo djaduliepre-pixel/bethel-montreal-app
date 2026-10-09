@@ -939,6 +939,105 @@ function suggererProchainHpNumber(cityName, bethelsTous) {
   return `Bethel-${ville}-${prochain}`;
 }
 
+
+/* ------------------------------------------------------------------ */
+/* Rôles officiels du portail + détection de zone (adresse/code postal) */
+/* ------------------------------------------------------------------ */
+const ROLES_OFFICIELS_FORM = [
+  { value: "Membre", label: "Member (Membre)" },
+  { value: "Leader", label: "Leader" },
+  { value: "Co-Leader", label: "Co-Leader" },
+  { value: "Stage Manager", label: "Stage Manager" },
+];
+const FSA_VERS_VILLE = {
+  H1A: "Pointe-aux-Trembles (PAT)", H1B: "Pointe-aux-Trembles (PAT)", H1C: "Rivière-des-Prairies", H1E: "Rivière-des-Prairies",
+  H1G: "Montréal-Nord", H1H: "Montréal-Nord", H1J: "Anjou", H1K: "Anjou",
+  H1L: "Mercier–Hochelaga-Maisonneuve", H1N: "Mercier–Hochelaga-Maisonneuve", H1V: "Mercier–Hochelaga-Maisonneuve", H1W: "Mercier–Hochelaga-Maisonneuve",
+  H1P: "Saint-Léonard", H1R: "Saint-Léonard", H1S: "Saint-Léonard", H1Z: "Saint-Michel", H2A: "Villeray",
+  H2B: "Ahuntsic-Cartierville", H2C: "Ahuntsic-Cartierville", H2M: "Ahuntsic-Cartierville", H2N: "Ahuntsic-Cartierville",
+  H2G: "Rosemont–La Petite-Patrie", H8Y: "Pierrefonds-Roxboro",
+  J5Y: "Repentigny", J5Z: "Repentigny", J6A: "Repentigny",
+  J6V: "Terrebonne", J6W: "Terrebonne", J6X: "Terrebonne", J6Y: "Terrebonne", J6Z: "Terrebonne", J7M: "Terrebonne",
+  J7K: "Mascouche", J7L: "Mascouche", J7E: "Sainte-Thérèse",
+};
+// Retourne { ville, zone, zonesVille, ambigue } à partir de l'adresse et du code postal.
+function zoneDepuisAdresse(adresse, codePostal, zones) {
+  const texte = `${adresse || ""} ${codePostal || ""}`;
+  const m = texte.toUpperCase().match(/\b([A-Z]\d[A-Z])\s?\d[A-Z]\d\b/);
+  const fsa = m ? m[1] : "";
+  let ville = "";
+  if (fsa === "H1T") return { ville: "", zone: null, zonesVille: [], ambigue: "H1T (Saint-Léonard ou Rosemont)", fsa };
+  if (fsa) ville = FSA_VERS_VILLE[fsa] || (fsa.startsWith("H7") ? "Laval" : "");
+  if (!ville) {
+    const t = normaliseNom(texte);
+    const trouve = [...new Set(zones.map((z) => z.city_name))].filter((c) => c.length > 4 && t.includes(normaliseNom(c))).sort((a, b) => b.length - a.length)[0];
+    ville = trouve || "";
+  }
+  if (!ville) return { ville: "", zone: null, zonesVille: [], ambigue: "", fsa };
+  const zonesVille = zones.filter((z) => z.city_name === ville);
+  const defaut = zonesVille.find((z) => /chomedey/i.test(z.zone_name)) || zonesVille.find((z) => z.zone_name === `${ville} ${ville}`) || zonesVille[0] || null;
+  return { ville, zone: defaut, zonesVille, ambigue: "", fsa };
+}
+
+function ReassignPanel({ membre, bethels, zones, bethelActuelId, onDone, onClose }) {
+  const [cands, setCands] = useState(null);
+  const [enCours, setEnCours] = useState("");
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    (async () => {
+      const info = zoneDepuisAdresse(membre.address, membre.postal_code, zones);
+      const actuel = bethels.find((b) => b.bethel_id === bethelActuelId);
+      const ville = info.ville || (actuel && actuel.city_name) || "";
+      const base = bethels.filter((b) => b.bethel_id !== bethelActuelId && b.status !== "inactive" && b.address && (!ville || b.city_name === ville));
+      const liste = await Promise.all(base.slice(0, 25).map(async (b) => {
+        try { return { b, minutes: membre.address ? await getDrivingMinutes(membre.address, b.address) : null }; } catch (e) { return { b, minutes: null }; }
+      }));
+      liste.sort((x, y) => (x.minutes == null ? 1e9 : x.minutes) - (y.minutes == null ? 1e9 : y.minutes));
+      setCands({ liste, ville });
+    })().catch((e) => { setMsg(e.message); setCands({ liste: [], ville: "" }); });
+    // eslint-disable-next-line
+  }, [membre.member_id]);
+  async function reassigner(c) {
+    const hors = c.minutes != null && c.minutes > LIMITE_MINUTES_PROXIMITE;
+    if (!window.confirm(`Réassigner ${membre.first_name} ${membre.last_name} à ${c.b.bethel_name_officiel || c.b.hp_number} (${c.b.leader_name || "—"})${hors ? `\n\n⚠️ ${c.minutes} min de trajet : au-delà de la règle des ${LIMITE_MINUTES_PROXIMITE} min.` : ""} ?`)) return;
+    setEnCours(c.b.bethel_id); setMsg("");
+    try {
+      if (ROLES_PEUVENT_DIRIGER.includes(membre.role)) {
+        const autres = await supaGet("members", `bethel_id=eq.${c.b.bethel_id}&status=eq.active&role=in.(%22Ananias%22,%22Bethel%20Leader%22,%22Overseer%22,%22Minist%C3%A8re%20Ordonn%C3%A9%22)&select=member_id`);
+        if (autres.length) throw new Error("Deux leaders ne peuvent pas cohabiter : ce Bethel a déjà un leader.");
+      }
+      const chaine = await chaineSupervisionDuBethel(c.b.bethel_id);
+      await supaPatch("members", `member_id=eq.${membre.member_id}`, { bethel_id: c.b.bethel_id, ...chaine });
+      onDone();
+    } catch (e) { setMsg("⚠️ " + e.message); } finally { setEnCours(""); }
+  }
+  return (
+    <div style={{ marginTop: "10px", paddingTop: "10px", borderTop: "1px solid var(--border)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: "12px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", marginBottom: "6px" }}>
+        <span>Réassigner vers un Bethel{cands && cands.ville ? ` de ${cands.ville}` : ""}</span>
+        <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", fontSize: "11.5px" }}>Fermer</button>
+      </div>
+      {msg && <div style={{ fontSize: "12px", color: "var(--brick)", marginBottom: "6px" }}>{msg}</div>}
+      {!cands ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Calcul des trajets…</div>
+        : cands.liste.length === 0 ? <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Aucun autre Bethel actif avec adresse dans ce secteur.</div>
+        : cands.liste.slice(0, 10).map((c) => (
+          <div key={c.b.bethel_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px", padding: "6px 0", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--ink)" }}>{c.b.leader_name || "—"}</div>
+              <div style={{ fontSize: "11px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{c.b.bethel_name_officiel || c.b.hp_number}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexShrink: 0 }}>
+              {c.minutes != null && <span style={{ fontSize: "11.5px", fontWeight: 600, color: c.minutes <= LIMITE_MINUTES_PROXIMITE ? "var(--teal)" : "var(--gold)" }}>🚗 {c.minutes} min</span>}
+              <button disabled={!!enCours} onClick={() => reassigner(c)} style={{ padding: "5px 10px", borderRadius: "6px", border: "1px solid var(--plum)", background: "transparent", color: "var(--plum)", fontSize: "11.5px", fontWeight: 600, cursor: "pointer" }}>
+                {enCours === c.b.bethel_id ? "…" : "Réassigner ici"}
+              </button>
+            </div>
+          </div>
+        ))}
+    </div>
+  );
+}
+
 function ManageMembersView({ bethels, onChanged }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "",
@@ -951,6 +1050,11 @@ function ManageMembersView({ bethels, onChanged }) {
   const [selectedBethel, setSelectedBethel] = useState(null);
   const [saving, setSaving] = useState(false);
   const [justAdded, setJustAdded] = useState(null);
+  const [zonesData, setZonesData] = useState([]);
+  const [rechercheBethelFaite, setRechercheBethelFaite] = useState(false);
+  const [reassignId, setReassignId] = useState(null);
+  useEffect(() => { supaGet("data_zones", "select=zone_id,city_name,zone_name&limit=2000").then(setZonesData).catch(() => {}); }, []);
+  const zoneInfo = useMemo(() => zoneDepuisAdresse(form.address, form.postal_code, zonesData), [form.address, form.postal_code, zonesData]);
 
   // Détection de doublon "en amont" : dès que le nom complet ou le téléphone
   // est saisi, on vérifie en base avant même de chercher un Bethel. Tant
@@ -966,7 +1070,7 @@ function ManageMembersView({ bethels, onChanged }) {
   const [hpNumberPropose, setHpNumberPropose] = useState("");
   const [creantNouveauBethel, setCreantNouveauBethel] = useState(false);
 
-  const peutDirigerEtDitOui = ROLES_PEUVENT_DIRIGER.includes(form.role) && form.willing_to_host;
+  const peutDirigerEtDitOui = (ROLES_PEUVENT_DIRIGER.includes(form.role) || form.role === "Leader") && form.willing_to_host;
 
   // Dès que le prénom+nom OU le téléphone changent, on revérifie en base
   // après un court délai (debounce) -- avant même que le staff clique sur
@@ -1018,7 +1122,9 @@ function ManageMembersView({ bethels, onChanged }) {
     setJustAdded(null);
     setZoneProposee(null);
     setHpNumberPropose("");
-    const candidatsPossibles = bethels.filter((b) => b.address);
+    setRechercheBethelFaite(false);
+    const idsZoneDetectee = new Set(zoneInfo.zonesVille.map((z) => z.zone_id));
+    const candidatsPossibles = bethels.filter((b) => b.address && b.status !== "inactive" && (idsZoneDetectee.size ? idsZoneDetectee.has(b.zone_id) : true));
     setCandidates(candidatsPossibles.map((b) => ({ bethel: b, minutes: null, error: null })));
     setLoadingDistances(true);
     try {
@@ -1042,7 +1148,10 @@ function ManageMembersView({ bethels, onChanged }) {
       // plus proche (même méthode de vérification utilisée manuellement toute
       // cette session : le Bethel voisin le plus proche indique la vraie zone).
       const plusProcheAvecZone = meilleurs.find((c) => c.minutes != null && c.bethel.zone_id);
-      if (plusProcheAvecZone) {
+      if (zoneInfo.zone) {
+        setZoneProposee({ zone_id: zoneInfo.zone.zone_id, zone_name: zoneInfo.zone.zone_name, city_name: zoneInfo.ville });
+        setHpNumberPropose(suggererProchainHpNumber(zoneInfo.ville, bethels));
+      } else if (plusProcheAvecZone) {
         const ville = plusProcheAvecZone.bethel.city_name || plusProcheAvecZone.bethel.zone_name;
         setZoneProposee({
           zone_id: plusProcheAvecZone.bethel.zone_id,
@@ -1063,7 +1172,31 @@ function ManageMembersView({ bethels, onChanged }) {
       }
     } finally {
       setLoadingDistances(false);
+      setRechercheBethelFaite(true);
     }
+  }
+
+  // Vivier d'attente : la personne devient une soumission « pending » classée dans la zone
+  // détectée (apparaît dans « En attente à [Ville] »). Aucun Bethel n'est forcé.
+  const [enregistrementVivier, setEnregistrementVivier] = useState(false);
+  async function enregistrerDansVivier() {
+    if (!form.first_name || !form.last_name) return;
+    if (doublonBloquant) { alert("Un doublon probable a été détecté. Coche \"Ce n'est pas un doublon\" avant de continuer."); return; }
+    setEnregistrementVivier(true);
+    try {
+      const [row] = await supaPost("submissions", {
+        hp_number: "POOL-" + Date.now().toString().slice(-8),
+        first_name: form.first_name.trim(), last_name: form.last_name.trim(), phone: form.phone,
+        address: [form.address, form.postal_code].filter(Boolean).join(", ") || null,
+        campus_id: CAMPUS_FIXE_ID, zone_id: zoneInfo.zone ? zoneInfo.zone.zone_id : null,
+        willing_to_host: !!form.willing_to_host, leadership_level: form.role === "Leader" ? "hp_leader" : "new_member",
+        status: "pending",
+      });
+      setJustAdded({ name: `${form.first_name} ${form.last_name}`, vivier: true, ville: zoneInfo.ville, bethel: { hp_number: "", leader_name: "" }, sub: row });
+      setForm({ first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "", address: "", postal_code: "", role: "Membre", willing_to_host: false });
+      setCandidates([]); setSelectedBethel(null); setRechercheBethelFaite(false);
+      onChanged();
+    } catch (e) { alert("Erreur : " + e.message); } finally { setEnregistrementVivier(false); }
   }
 
   // Pour un leader (Ananias/Bethel Leader/Overseer/Ministre) qui a dit "oui" à
@@ -1128,11 +1261,13 @@ function ManageMembersView({ bethels, onChanged }) {
         setSaving(false);
         return;
       }
+      const chaineHeritee = await chaineSupervisionDuBethel(selectedBethel.bethel_id);
       await supaPost("members", {
         first_name: form.first_name, last_name: form.last_name, phone: form.phone,
         email: form.email || null, gender: form.gender || null, decision: form.decision || null,
         address: form.address, postal_code: form.postal_code, role: form.role,
         willing_to_host: form.willing_to_host, bethel_id: selectedBethel.bethel_id, status: "active",
+        ...chaineHeritee,
       });
       setJustAdded({
         name: `${form.first_name} ${form.last_name}`, bethel: selectedBethel,
@@ -1178,18 +1313,36 @@ function ManageMembersView({ bethels, onChanged }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
 
-  async function retirerMembre(m) {
-    if (!window.confirm(`Retirer ${m.first_name} ${m.last_name} de l'église ?`)) return;
+  // Détacher : le profil est conservé (fiche passée inactive, rien n'est supprimé) et la personne
+  // est remise dans le vivier d'attente de sa zone (soumission « pending »).
+  async function detacherMembre(m) {
+    const b = bethelById[m.bethel_id];
+    const estChef = ROLES_PEUVENT_DIRIGER.includes(m.role);
+    const info = zoneDepuisAdresse(m.address, m.postal_code, zonesData);
+    const zoneId = info.zone ? info.zone.zone_id : (b && b.zone_id) || null;
+    if (!window.confirm(`Détacher ${m.first_name} ${m.last_name} de ${b ? (b.bethel_name_officiel || b.hp_number) : "son Bethel"} ?${estChef ? "\n\n⚠️ C'est un leader : le Bethel pourrait rester sans leader." : ""}\n\nLe profil est conservé et la personne rejoint le vivier d'attente${info.ville ? ` (En attente à ${info.ville})` : ""}.`)) return;
     setBusyId(m.member_id);
     try {
-      await supaDelete("members", `member_id=eq.${m.member_id}`);
+      await supaPost("submissions", {
+        hp_number: "POOL-" + Date.now().toString().slice(-8), first_name: m.first_name, last_name: m.last_name, phone: m.phone || null,
+        address: [m.address, m.postal_code].filter(Boolean).join(", ") || null, campus_id: CAMPUS_FIXE_ID, zone_id: zoneId,
+        willing_to_host: !!m.willing_to_host, leadership_level: estChef ? "hp_leader" : "new_member", status: "pending",
+      });
+      await supaPatch("members", `member_id=eq.${m.member_id}`, { status: "inactive" });
       setResults((r) => r.filter((x) => x.member_id !== m.member_id));
       onChanged();
-    } catch (e) {
-      alert("Erreur : " + e.message);
-    } finally {
-      setBusyId(null);
-    }
+    } catch (e) { alert("Erreur : " + e.message); } finally { setBusyId(null); }
+  }
+
+  // Désactiver : archive le membre (statut inactif). Aucune suppression.
+  async function desactiverMembre(m) {
+    if (!window.confirm(`Désactiver ${m.first_name} ${m.last_name} ?\n\nLa fiche est archivée (statut inactif) : elle n'est pas supprimée.`)) return;
+    setBusyId(m.member_id);
+    try {
+      await supaPatch("members", `member_id=eq.${m.member_id}`, { status: "inactive" });
+      setResults((r) => r.filter((x) => x.member_id !== m.member_id));
+      onChanged();
+    } catch (e) { alert("Erreur : " + e.message); } finally { setBusyId(null); }
   }
 
   const bethelById = useMemo(() => Object.fromEntries(bethels.map((b) => [b.bethel_id, b])), [bethels]);
@@ -1227,7 +1380,7 @@ function ManageMembersView({ bethels, onChanged }) {
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 10px", alignItems: "center" }}>
           <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
-            {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
+            {ROLES_OFFICIELS_FORM.map((r) => <option key={r.value} value={r.value}>{r.label}</option>)}
           </select>
           <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "12.5px", color: "var(--ink-muted)", marginBottom: "10px" }}>
             <input type="checkbox" checked={form.willing_to_host} onChange={(e) => setForm((f) => ({ ...f, willing_to_host: e.target.checked }))} />
@@ -1235,6 +1388,16 @@ function ManageMembersView({ bethels, onChanged }) {
           </label>
         </div>
 
+        {(form.address || form.postal_code) && (
+          <div style={{ fontSize: "12px", marginBottom: "10px", padding: "8px 10px", borderRadius: "8px", background: "var(--bg)", border: "1px solid var(--border)", color: "var(--ink)" }}>
+            {zoneInfo.ville ? <>📍 Zone détectée : <strong>{zoneInfo.ville}</strong></> : zoneInfo.ambigue ? <>📍 Zone ambiguë : {zoneInfo.ambigue}. Choisis le Bethel à la main.</> : <>📍 Zone non reconnue : complète l'adresse et le code postal.</>}
+          </div>
+        )}
+        {form.willing_to_host && (
+          <div style={{ fontSize: "12px", marginBottom: "10px", padding: "8px 10px", borderRadius: "8px", background: "rgba(31,92,78,0.08)", border: "1px solid var(--teal)", color: "var(--ink)" }}>
+            🏠 Cette personne peut devenir <strong>hôte potentielle d'un nouveau Bethel</strong>{zoneInfo.ville ? ` à ${zoneInfo.ville}` : " dans sa zone"} (règle 2.D) : un leader « Non » de la zone pourra venir chez elle (Rapports › Jumelages).
+          </div>
+        )}
         {verifiantDoublon && (
           <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "10px" }}>
             Vérification des doublons…
@@ -1269,7 +1432,23 @@ function ManageMembersView({ bethels, onChanged }) {
             justifyContent: "center", gap: "6px", marginBottom: candidates.length ? "14px" : 0,
           }}
         >
-          <Search size={14} /> {loadingDistances ? "Recherche du Bethel le plus proche…" : "Trouver le Bethel le plus proche"}
+          <Search size={14} /> {loadingDistances ? "Recherche du Bethel le plus proche…" : `Trouver le Bethel le plus proche${zoneInfo.ville ? ` (${zoneInfo.ville})` : ""}`}
+        </button>
+
+        {rechercheBethelFaite && !loadingDistances && candidates.length === 0 && (
+          <div style={{ marginBottom: "10px", padding: "10px 12px", borderRadius: "8px", background: "rgba(184,134,59,0.10)", border: "1px solid rgba(184,134,59,0.3)", fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.5 }}>
+            ⚠️ Aucun Bethel actif avec adresse {zoneInfo.ville ? `à ${zoneInfo.ville}` : "dans ce secteur"}. Enregistre la personne dans le vivier d'attente ci-dessous.
+          </div>
+        )}
+        <button
+          onClick={enregistrerDansVivier}
+          disabled={!form.first_name || !form.last_name || enregistrementVivier || doublonBloquant}
+          style={{
+            width: "100%", padding: "9px", borderRadius: "8px", border: "1px solid var(--gold)", background: "transparent", color: "var(--gold)",
+            fontSize: "13px", fontWeight: 600, cursor: form.first_name && form.last_name ? "pointer" : "not-allowed", marginBottom: "14px", marginTop: candidates.length ? 0 : "8px",
+          }}
+        >
+          {enregistrementVivier ? "Enregistrement…" : `Enregistrer dans le vivier d'attente${zoneInfo.ville ? ` (En attente à ${zoneInfo.ville})` : ""} sans assigner`}
         </button>
 
         {peutDirigerEtDitOui && zoneProposee && !loadingDistances && (
@@ -1366,7 +1545,7 @@ function ManageMembersView({ bethels, onChanged }) {
               background: "var(--plum)", color: "#fff", fontSize: "13.5px", fontWeight: 600, cursor: "pointer",
             }}
           >
-            {saving ? "Ajout en cours…" : `Ajouter dans ${selectedBethel.hp_number} (${selectedBethel.leader_name})`}
+            {saving ? "Ajout en cours…" : `Assigner à ce Bethel : ${selectedBethel.bethel_name_officiel || selectedBethel.hp_number} (${selectedBethel.leader_name})`}
           </button>
         )}
 
@@ -1376,13 +1555,15 @@ function ManageMembersView({ bethels, onChanged }) {
             background: "rgba(31,92,78,0.10)", color: "var(--teal)", fontSize: "12.5px", fontWeight: 600,
           }}>
             <Check size={13} style={{ verticalAlign: "-2px", marginRight: "4px" }} />
-            {justAdded.nouveauBethelCree
+            {justAdded.vivier
+              ? `${justAdded.name} enregistré(e) dans le vivier d'attente${justAdded.ville ? ` (En attente à ${justAdded.ville})` : ""}.`
+              : justAdded.nouveauBethelCree
               ? `${justAdded.name} dirige maintenant son propre Bethel : ${justAdded.bethel.hp_number}.`
               : `${justAdded.name} ajouté(e) à ${justAdded.bethel.hp_number} (${justAdded.bethel.leader_name}).`}
           </div>
         )}
 
-        {justAdded && justAdded.details && (
+        {justAdded && justAdded.details && !justAdded.vivier && (
           <div style={{
             marginTop: "10px", padding: "16px", borderRadius: "10px",
             border: "1px solid var(--border)", background: "#fafafa",
@@ -1447,20 +1628,26 @@ function ManageMembersView({ bethels, onChanged }) {
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                   <span style={{ fontSize: "11.5px", color: "var(--plum)", fontWeight: 600 }}>{ouvert ? "Masquer" : "Voir la fiche"}</span>
-                  <button
-                    disabled={busyId === m.member_id}
-                    onClick={(e) => { e.stopPropagation(); retirerMembre(m); }}
-                    title="Retirer"
-                    style={{
-                      display: "flex", alignItems: "center", gap: "5px", padding: "6px 11px", borderRadius: "7px",
-                      border: "1px solid var(--brick)", background: "transparent", color: "var(--brick)",
-                      fontSize: "12px", fontWeight: 600, cursor: "pointer",
-                    }}
-                  >
-                    <Trash2 size={12} /> {busyId === m.member_id ? "…" : "Retirer"}
-                  </button>
                 </div>
               </div>
+              <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" }} onClick={(e) => e.stopPropagation()}>
+                {[
+                  { label: "Détacher du Bethel", color: "var(--gold)", fn: () => detacherMembre(m) },
+                  { label: "Réassigner", color: "var(--plum)", fn: () => setReassignId(reassignId === m.member_id ? null : m.member_id) },
+                  { label: "Supprimer / Désactiver", color: "var(--brick)", fn: () => desactiverMembre(m) },
+                ].map((a) => (
+                  <button key={a.label} disabled={busyId === m.member_id} onClick={a.fn} style={{
+                    padding: "6px 11px", borderRadius: "7px", border: `1px solid ${a.color}`, background: "transparent", color: a.color,
+                    fontSize: "12px", fontWeight: 600, cursor: "pointer",
+                  }}>{busyId === m.member_id ? "…" : a.label}</button>
+                ))}
+              </div>
+              {reassignId === m.member_id && (
+                <div onClick={(e) => e.stopPropagation()}>
+                  <ReassignPanel membre={m} bethels={bethels} zones={zonesData} bethelActuelId={m.bethel_id}
+                    onClose={() => setReassignId(null)} onDone={() => { setReassignId(null); relancerRecherche(); onChanged(); }} />
+                </div>
+              )}
               {ouvert && (
                 <div style={{
                   marginTop: "10px", paddingTop: "10px", borderTop: "1px solid var(--border)",
