@@ -3249,6 +3249,46 @@ function DistanceDeuxAdresses() {
   );
 }
 
+// Soumissions « HP churches » en attente (pending) rattachées à une ville : permet de
+// retrouver à tout moment un leader qui a dit Non (ex. Wilfrid) et de le récupérer s'il dit Oui plus tard.
+function EnAttenteDeVille({ ville }) {
+  const [lignes, setLignes] = useState([]);
+  useEffect(() => {
+    let annule = false;
+    (async () => {
+      try {
+        const zones = await supaGet("data_zones", `city_name=eq.${encodeURIComponent(ville)}&select=zone_id`);
+        if (!zones.length) { if (!annule) setLignes([]); return; }
+        const ids = zones.map((z) => z.zone_id).join(",");
+        const subs = await supaGet("submissions", `status=eq.pending&zone_id=in.(${ids})&select=submission_id,first_name,last_name,phone,address,willing_to_host,leadership_level,submitted_at&order=submitted_at.desc`);
+        if (!annule) setLignes(subs);
+      } catch (e) { if (!annule) setLignes([]); }
+    })();
+    return () => { annule = true; };
+  }, [ville]);
+  if (!lignes.length) return null;
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)", padding: "12px 14px", marginBottom: "16px" }}>
+      <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
+        En attente à {ville} ({lignes.length}) — soumissions pending, à approuver quand une maison est prête
+      </div>
+      {lignes.map((s) => (
+        <div key={s.submission_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "6px 0", borderTop: "1px solid var(--border)" }}>
+          <div>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)" }}>{s.first_name} {s.last_name}</div>
+            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[LEADERSHIP_LABELS[s.leadership_level], s.phone, s.address].filter(Boolean).join(" · ")}</div>
+          </div>
+          {s.willing_to_host === true ? (
+            <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Oui</span>
+          ) : s.willing_to_host === false ? (
+            <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", background: "rgba(162,59,51,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Non</span>
+          ) : <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>—</span>}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
   const [recherche, setRecherche] = useState("");
   const [filtre, setFiltre] = useState("all");
@@ -3397,6 +3437,8 @@ function BethelsView({ bethels, memberCounts, onOpenDetail, onReload }) {
           </div>
         )}
       </div>
+
+      {villeChoisie !== "all" && <EnAttenteDeVille ville={villeChoisie} />}
 
       {resultats.length === 0 ? (
         <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
