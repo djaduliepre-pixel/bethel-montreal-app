@@ -3331,6 +3331,7 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
   const [recherche, setRecherche] = useState("");
   const [pool, setPool] = useState([]);
   const [envoiId, setEnvoiId] = useState(null);
+  const [formPresence, setFormPresence] = useState(false);
 
   const titres = {
     voir: "Détails du Bethel",
@@ -3437,6 +3438,13 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
               ))}
             <AddMemberForm bethelId={bethel.bethel_id} bethel={bethel} onAdded={() => { chargerMembres(); onReload(); }} />
             <FindNearbyMembersPanel bethel={bethel} onAssigned={() => { chargerMembres(); onReload(); }} />
+            <button onClick={() => setFormPresence(true)} style={{
+              marginTop: "16px", marginRight: "8px", padding: "8px 14px", borderRadius: "8px", border: "none",
+              background: "var(--plum)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer",
+            }}>
+              + Enregistrer une présence
+            </button>
+            {formPresence && <AttendanceFormModal bethels={bethels} bethelIdInitial={bethel.bethel_id} onClose={() => setFormPresence(false)} />}
             <button onClick={() => { onClose(); onOpenDetail(bethel); }} style={{
               marginTop: "16px", padding: "8px 14px", borderRadius: "8px", border: "1px solid var(--plum)",
               background: "transparent", color: "var(--plum)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
@@ -6194,6 +6202,105 @@ function SearchMembersView({ bethels, onOpenBethel }) {
 const dateIso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 function lundiDe(d) { const x = new Date(d.getFullYear(), d.getMonth(), d.getDate()); const j = (x.getDay() + 6) % 7; x.setDate(x.getDate() - j); return x; }
 
+/* ------------------------------------------------------------------ */
+/* Formulaire de saisie rapide d'une présence (administrateur).        */
+/* Insère ou met à jour la ligne (bethel_id, semaine) de `attendance`. */
+/* ------------------------------------------------------------------ */
+function AttendanceFormModal({ bethels, bethelIdInitial, semaineInitiale, onSaved, onClose }) {
+  const liste = useMemo(() => bethels.filter((b) => b.status !== "inactive" && estBethelOfficielLigne(b)).sort((a, b) => (a.leader_name || "").localeCompare(b.leader_name || "")), [bethels]);
+  const [bethelId, setBethelId] = useState(bethelIdInitial || "");
+  const [jour, setJour] = useState(semaineInitiale || dateIso(new Date()));
+  const [vals, setVals] = useState({ sunday_count: "", visitors_count: "", midweek_count: "", decisions_count: "", home_visits_count: "", notes: "", status: "On time" });
+  const [existe, setExiste] = useState(null);
+  const [enCours, setEnCours] = useState(false);
+  const [msg, setMsg] = useState("");
+  const lun = lundiDe(new Date(`${jour}T12:00:00`));
+  const debut = dateIso(lun);
+  const fin = dateIso(new Date(lun.getFullYear(), lun.getMonth(), lun.getDate() + 6));
+
+  useEffect(() => {
+    setExiste(null);
+    if (!bethelId) return;
+    supaGet("attendance", `bethel_id=eq.${bethelId}&week_start_date=eq.${debut}&select=*`).then((r) => {
+      const l = r[0] || null; setExiste(l);
+      setVals(l ? { sunday_count: l.sunday_count, visitors_count: l.visitors_count, midweek_count: l.midweek_count, decisions_count: l.decisions_count, home_visits_count: l.home_visits_count, notes: l.notes || "", status: l.status || "On time" }
+        : { sunday_count: "", visitors_count: "", midweek_count: "", decisions_count: "", home_visits_count: "", notes: "", status: "On time" });
+    }).catch(() => {});
+  }, [bethelId, debut]);
+
+  const nb = (k) => Math.max(0, parseInt(vals[k], 10) || 0);
+  const total = nb("sunday_count") + nb("visitors_count");
+  const maj = (k, v) => setVals((x) => ({ ...x, [k]: v }));
+
+  async function enregistrer() {
+    if (!bethelId) { setMsg("Choisissez un Bethel."); return; }
+    setEnCours(true); setMsg("");
+    try {
+      const corps = {
+        bethel_id: bethelId, week_start_date: debut, week_end_date: fin,
+        sunday_count: nb("sunday_count"), visitors_count: nb("visitors_count"), midweek_count: nb("midweek_count"),
+        decisions_count: nb("decisions_count"), home_visits_count: nb("home_visits_count"),
+        notes: vals.notes.trim() || null, status: vals.status, submitted_at: new Date().toISOString(),
+      };
+      const res = existe ? await supaPatch("attendance", `id=eq.${existe.id}`, corps) : await supaPost("attendance", corps);
+      onSaved && onSaved(res[0]);
+      onClose();
+    } catch (e) { setMsg("⚠️ " + e.message); } finally { setEnCours(false); }
+  }
+
+  const champ = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13.5px", width: "100%", boxSizing: "border-box" };
+  const lab = { fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", display: "block", marginBottom: "4px" };
+  const nombre = (k, label) => (
+    <div><label style={lab}>{label}</label><input type="number" min="0" value={vals[k]} onChange={(e) => maj(k, e.target.value)} style={champ} /></div>
+  );
+  return (
+    <>
+      <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 80 }} />
+      <div style={{ position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)", width: "min(520px, 94vw)", maxHeight: "92vh", overflowY: "auto", background: "var(--surface)", borderRadius: "14px", padding: "20px", zIndex: 81, boxShadow: "0 12px 40px rgba(0,0,0,0.25)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "14px" }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: "20px", color: "var(--ink)" }}>Enregistrer une présence</div>
+          <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={18} /></button>
+        </div>
+        <div style={{ marginBottom: "12px" }}>
+          <label style={lab}>Bethel</label>
+          <select value={bethelId} onChange={(e) => setBethelId(e.target.value)} style={champ}>
+            <option value="">Choisir un Bethel…</option>
+            {liste.map((b) => <option key={b.bethel_id} value={b.bethel_id}>{b.leader_name || "—"} · {b.bethel_name_officiel || b.hp_number}</option>)}
+          </select>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "12px" }}>
+          <div><label style={lab}>Semaine (un jour de la semaine)</label><input type="date" value={jour} onChange={(e) => e.target.value && setJour(e.target.value)} style={champ} /></div>
+          <div><label style={lab}>Du lundi au dimanche</label><div style={{ ...champ, background: "var(--bg)", color: "var(--ink)" }}>{debut} → {fin}</div></div>
+        </div>
+        {existe && <div style={{ fontSize: "12px", color: "var(--gold)", marginBottom: "10px" }}>Une présence existe déjà pour cette semaine : elle sera mise à jour.</div>}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", marginBottom: "10px" }}>
+          {nombre("sunday_count", "Dimanche (membres présents)")}
+          {nombre("visitors_count", "Visiteurs (invités)")}
+          {nombre("midweek_count", "Réunions de semaine")}
+          {nombre("decisions_count", "Décisions (âmes sauvées)")}
+          {nombre("home_visits_count", "Visites à domicile")}
+          <div><label style={lab}>Total (dimanche + visiteurs)</label><div style={{ ...champ, background: "var(--bg)", fontWeight: 700 }}>{total}</div></div>
+        </div>
+        <div style={{ marginBottom: "10px" }}>
+          <label style={lab}>Statut</label>
+          <select value={vals.status} onChange={(e) => maj("status", e.target.value)} style={champ}><option>On time</option><option>Late</option></select>
+        </div>
+        <div style={{ marginBottom: "12px" }}>
+          <label style={lab}>Notes / Commentaires (optionnel)</label>
+          <textarea value={vals.notes} onChange={(e) => maj("notes", e.target.value)} rows={3} style={{ ...champ, resize: "vertical", fontFamily: "inherit" }} />
+        </div>
+        {msg && <div style={{ fontSize: "12.5px", color: "var(--brick)", marginBottom: "10px" }}>{msg}</div>}
+        <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+          <button onClick={onClose} style={{ padding: "8px 16px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "13px", cursor: "pointer" }}>Annuler</button>
+          <button onClick={enregistrer} disabled={enCours || !bethelId} style={{ padding: "8px 18px", borderRadius: "8px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer", opacity: enCours || !bethelId ? 0.5 : 1 }}>
+            {enCours ? "Enregistrement…" : "Enregistrer"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
 function AttendanceView() {
   const [lundi, setLundi] = useState(() => lundiDe(new Date()));
   const [bethels, setBethels] = useState(null);
@@ -6204,6 +6311,7 @@ function AttendanceView() {
   const [filtre, setFiltre] = useState("tous");
   const [enCours, setEnCours] = useState("");
   const [message, setMessage] = useState("");
+  const [formOuvert, setFormOuvert] = useState(false);
   const debut = dateIso(lundi);
   const fin = dateIso(new Date(lundi.getFullYear(), lundi.getMonth(), lundi.getDate() + 6));
 
@@ -6276,6 +6384,13 @@ function AttendanceView() {
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Présences</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 14px" }}>Campus: TG Montreal — présences hebdomadaires des Bethels.</p>
+      <div style={{ marginBottom: "12px" }}>
+        <button onClick={() => setFormOuvert(true)} style={{ ...btn, background: "var(--plum)", color: "#fff", border: "none", padding: "8px 16px" }}>+ Enregistrer une présence</button>
+      </div>
+      {formOuvert && (
+        <AttendanceFormModal bethels={bethels} semaineInitiale={debut} onClose={() => setFormOuvert(false)}
+          onSaved={(row) => { setFiltre("soumis"); if (row.week_start_date === debut) setLignes((l) => ({ ...l, [row.bethel_id]: row })); else setLundi(new Date(`${row.week_start_date}T12:00:00`)); }} />
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
         <button style={btn} onClick={() => setLundi(new Date(lundi.getFullYear(), lundi.getMonth(), lundi.getDate() - 7))}>← Semaine précédente</button>
         <div style={{ fontSize: "14px", fontWeight: 700, color: "var(--ink)" }}>Semaine du {debut} au {fin}</div>
