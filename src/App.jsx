@@ -5553,7 +5553,7 @@ const [tab, setTab] = useState("hosting");
       </p>
 
       <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
-        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "supervision", label: "Format de supervision des Bethels" }, { id: "orgchart", label: "Organigramme" }, { id: "jumelage", label: "Jumelages" }].map((t) => (
+        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "jumelage", label: "Jumelages" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -5569,10 +5569,6 @@ const [tab, setTab] = useState("hosting");
         <JumelageView zones={zones} onChanged={onChanged} />
       ) : tab === "bethelsupervision" ? (
         <BethelSupervisionReport />
-      ) : tab === "supervision" ? (
-        <BethelSupervisionFormatView />
-      ) : tab === "orgchart" ? (
-        <OrgChartView />
       ) : tab === "hosting" ? (
         submissions.length === 0 ? (
           <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "28px", textAlign: "center", color: "var(--ink-muted)", fontSize: "13.5px" }}>
