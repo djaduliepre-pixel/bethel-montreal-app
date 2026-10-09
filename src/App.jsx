@@ -3055,7 +3055,7 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
       const idsAnciens = new Set(bethels.filter((b) => !estBethelOfficielLigne(b)).map((b) => b.bethel_id));
       const [mem, soum] = await Promise.all([
         supaGetTout("members", "select=member_id,first_name,last_name,phone,address,postal_code,city,bethel_id"),
-        supaGet("submissions", "status=eq.pending&select=submission_id,first_name,last_name,phone,address,postal_code,leadership_level"),
+        supaGet("submissions", "status=eq.pending&select=submission_id,first_name,last_name,phone,address,leadership_level"),
       ]);
       const codeParId = Object.fromEntries(bethels.map((b) => [b.bethel_id, b.hp_number]));
       setPool([
