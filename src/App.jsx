@@ -5328,6 +5328,206 @@ function BethelSupervisionFormatView() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Rapports > Jumelages : un leader qui ne reçoit pas (Non) est envoyé  */
+/* chez un membre qui reçoit (Oui) de la même ville. Crée un nouveau   */
+/* Bethel chez l'hôte. Ne supprime rien : l'ancien groupe est          */
+/* simplement désactivé s'il se retrouve vide.                         */
+/* ------------------------------------------------------------------ */
+function JumelageView({ zones, onChanged }) {
+  const [donnees, setDonnees] = useState(null);
+  const [ville, setVille] = useState("");
+  const [chefCle, setChefCle] = useState("");
+  const [hoteCle, setHoteCle] = useState("");
+  const [form, setForm] = useState({ numero: "", overseer: "", ministre: "" });
+  const [enCours, setEnCours] = useState(false);
+  const [message, setMessage] = useState("");
+
+  async function charger() {
+    const [mem, bet, subs] = await Promise.all([
+      supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone,address,postal_code,willing_to_host,bethel_id,overseer_name,ordained_minister_name"),
+      supaGetTout("bethels", "select=bethel_id,hp_number,bethel_name_officiel,status,zone_id,campus_id,leader_name"),
+      supaGetTout("submissions", "select=submission_id,first_name,last_name,phone,address,campus_id,willing_to_host,leadership_level,status,zone_id,submitted_at&order=submitted_at.desc"),
+    ]);
+    setDonnees({ mem, bet, subs });
+  }
+  useEffect(() => { charger().catch((e) => setMessage("Erreur de chargement : " + e.message)); /* eslint-disable-next-line */ }, []);
+
+  const villeDeZone = useMemo(() => Object.fromEntries(zones.map((z) => [z.zone_id, z.city_name])), [zones]);
+
+  const analyse = useMemo(() => {
+    if (!donnees) return null;
+    const { mem, bet, subs } = donnees;
+    const betParId = Object.fromEntries(bet.map((b) => [b.bethel_id, b]));
+    const cle = (p) => normaliseNom(`${p.first_name} ${p.last_name}`);
+    const subParCle = {};
+    subs.forEach((x) => { const k = cle(x); if (!subParCle[k]) subParCle[k] = x; }); // la plus récente d'abord
+    const ville_de = (p, k) => {
+      const sb = subParCle[k];
+      const zSub = sb && sb.zone_id ? villeDeZone[sb.zone_id] : null;
+      const b = betParId[p.bethel_id];
+      return zSub || (b && villeDeZone[b.zone_id]) || "";
+    };
+    const chefs = []; const hotes = []; const vus = new Set();
+    mem.forEach((m) => {
+      const k = cle(m); if (vus.has(k)) return; vus.add(k);
+      const sb = subParCle[k];
+      const veutRecevoir = sb ? sb.willing_to_host : m.willing_to_host;
+      const b = betParId[m.bethel_id];
+      const v = ville_de(m, k);
+      if (!v) return;
+      if (ROLES_PEUVENT_DIRIGER.includes(m.role)) {
+        const dirigeDeja = b && b.status !== "inactive" && estBethelOfficielLigne(b) && normaliseNom(b.leader_name || "") === k;
+        if (veutRecevoir === false && !dirigeDeja) chefs.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "" });
+      } else if (veutRecevoir === true) {
+        hotes.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "", adresse: m.address || (sb && sb.address) || "" });
+      }
+    });
+    // Hôtes « Oui » qui n'ont encore aucune fiche membre (soumissions en attente)
+    const vusSub = new Set();
+    subs.forEach((x) => {
+      const k = cle(x); if (vusSub.has(k)) return; vusSub.add(k);
+      if (vus.has(k) || x.status !== "pending" || x.willing_to_host !== true || !x.zone_id) return;
+      hotes.push({ cle: k, type: "submission", sub: x, ville: villeDeZone[x.zone_id] || "", origine: "HP churches (réponses)", adresse: x.address || "" });
+    });
+    const villes = [...new Set([...chefs, ...hotes].map((x) => x.ville).filter(Boolean))].sort();
+    return { chefs, hotes, villes, betParId, subParCle };
+  }, [donnees, villeDeZone]);
+
+  const chef = analyse && analyse.chefs.find((c) => c.cle === chefCle && c.ville === ville);
+  const hote = analyse && analyse.hotes.find((h) => h.cle === hoteCle && h.ville === ville);
+
+  useEffect(() => {
+    if (chef) setForm((f) => ({ ...f, overseer: chef.m.overseer_name || "", ministre: chef.m.ordained_minister_name || "" }));
+    // eslint-disable-next-line
+  }, [chefCle]);
+
+  async function former() {
+    if (!chef || !hote) return;
+    const numero = form.numero.trim();
+    if (numero && !/^Bethel-.+-\d{6}$/i.test(numero)) { setMessage("Le numéro officiel doit ressembler à Bethel-Montréal-000058 (ou rester vide)."); return; }
+    if (!hote.adresse) { setMessage("L'hôte n'a pas d'adresse enregistrée : ajoutez-la d'abord dans sa fiche."); return; }
+    const nomChef = `${chef.m.first_name} ${chef.m.last_name}`.trim();
+    const nomHote = hote.type === "member" ? `${hote.m.first_name} ${hote.m.last_name}`.trim() : `${hote.sub.first_name} ${hote.sub.last_name}`.trim();
+    if (!window.confirm(`Former un nouveau Bethel ?\n\nLeader : ${nomChef}\nChez : ${nomHote}\nAdresse : ${hote.adresse}\nVille : ${ville}\nNuméro : ${numero || "(à venir)"}\n\nAucun groupe ne sera supprimé.`)) return;
+    setEnCours(true); setMessage("");
+    let etape = "début";
+    try {
+      if (numero) {
+        etape = "vérification du numéro";
+        const deja = await supaGet("bethels", `or=(hp_number.eq.${encodeURIComponent(numero)},bethel_name_officiel.eq.${encodeURIComponent(numero)})&select=bethel_id`);
+        if (deja.length) throw new Error("Ce numéro est déjà utilisé par un autre Bethel.");
+      }
+      const { betParId } = analyse;
+      const ancienChef = betParId[chef.m.bethel_id];
+      const ancienHote = hote.type === "member" ? betParId[hote.m.bethel_id] : null;
+      const zoneVille = zones.filter((z) => z.city_name === ville);
+      const zoneId = (hote.type === "submission" && hote.sub.zone_id && villeDeZone[hote.sub.zone_id] === ville ? hote.sub.zone_id : (zoneVille[0] || {}).zone_id);
+      const campusId = (ancienHote && ancienHote.campus_id) || (ancienChef && ancienChef.campus_id) || (hote.type === "submission" ? hote.sub.campus_id : null);
+      if (!zoneId || !campusId) throw new Error("Zone ou campus introuvable pour ce Bethel.");
+      const nouveauId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : null;
+      const chaine = { ananias_name: nomChef, overseer_name: form.overseer.trim() || null, ordained_minister_name: form.ministre.trim() || null };
+
+      etape = "création du Bethel";
+      const cree = await supaPost("bethels", {
+        ...(nouveauId ? { bethel_id: nouveauId } : {}),
+        hp_number: numero || `FORM-${Date.now()}`, bethel_name_officiel: numero || null,
+        campus_id: campusId, zone_id: zoneId, leader_name: nomChef, leader_role: chef.m.role,
+        host_name: nomHote, address: hote.adresse, status: "active",
+      });
+      const idNeuf = (cree && cree[0] && cree[0].bethel_id) || nouveauId;
+      if (!idNeuf) throw new Error("Identifiant du nouveau Bethel introuvable.");
+
+      etape = "déplacement du leader";
+      await supaPatch("members", `member_id=eq.${chef.m.member_id}`, { bethel_id: idNeuf, ...chaine });
+      etape = "rattachement de l'hôte";
+      if (hote.type === "member") {
+        await supaPatch("members", `member_id=eq.${hote.m.member_id}`, { bethel_id: idNeuf, willing_to_host: true, ...chaine });
+      } else {
+        await supaPost("members", { bethel_id: idNeuf, first_name: hote.sub.first_name.trim(), last_name: hote.sub.last_name.trim(), phone: hote.sub.phone, address: hote.sub.address, role: "Membre", willing_to_host: true, status: "active", ...chaine });
+      }
+      etape = "approbation de la soumission de l'hôte";
+      const sbHote = analyse.subParCle[hote.cle];
+      if (sbHote && sbHote.status === "pending") {
+        await supaPatch("submissions", `submission_id=eq.${sbHote.submission_id}`, { status: "approved", zone_id: zoneId, reviewed_at: new Date().toISOString() });
+      }
+      etape = "ancien groupe du leader";
+      if (ancienChef && ancienChef.status !== "inactive" && !estBethelOfficielLigne(ancienChef)) {
+        const reste = await supaGet("members", `bethel_id=eq.${ancienChef.bethel_id}&status=eq.active&select=member_id`);
+        if (reste.length === 0) await supaPatch("bethels", `bethel_id=eq.${ancienChef.bethel_id}`, { status: "inactive" });
+      }
+      setMessage(`✅ Bethel créé : ${nomChef} chez ${nomHote}${numero ? ` (${numero})` : ""}.`);
+      setChefCle(""); setHoteCle(""); setForm({ numero: "", overseer: "", ministre: "" });
+      await charger(); onChanged && onChanged();
+    } catch (e) {
+      setMessage(`⚠️ Échec à l'étape « ${etape} » : ${e.message}. Vérifiez dans la page Bethels avant de recommencer.`);
+    } finally { setEnCours(false); }
+  }
+
+  if (!analyse) return <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>{message || "Chargement…"}</div>;
+
+  const colonne = (titre, liste, choisi, setChoisi, couleur) => (
+    <div style={{ flex: "1 1 320px", border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)", padding: "12px 14px", minWidth: 0 }}>
+      <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>{titre} ({liste.length})</div>
+      {liste.length === 0 && <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Personne dans cette ville.</div>}
+      {liste.map((x) => {
+        const p = x.type === "member" ? x.m : x.sub;
+        const actif = choisi === x.cle;
+        return (
+          <div key={x.cle} onClick={() => setChoisi(actif ? "" : x.cle)} style={{
+            cursor: "pointer", padding: "7px 8px", borderRadius: "8px", marginBottom: "4px",
+            border: `1px solid ${actif ? couleur : "transparent"}`, background: actif ? "rgba(107,42,62,0.06)" : "transparent",
+          }}>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)" }}>{p.first_name} {p.last_name}{x.type === "member" && ROLES_PEUVENT_DIRIGER.includes(x.m.role) ? ` · ${x.m.role}` : ""}</div>
+            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[p.phone, x.adresse || p.address].filter(Boolean).join(" · ") || "Adresse inconnue"}</div>
+            {x.origine && <div style={{ fontSize: "10.5px", color: "var(--gold)", fontFamily: "var(--font-mono)" }}>{x.origine}</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  const chefsVille = analyse.chefs.filter((c) => c.ville === ville);
+  const hotesVille = analyse.hotes.filter((h) => h.ville === ville);
+  const champ = { padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", width: "100%", boxSizing: "border-box" };
+
+  return (
+    <div>
+      <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginBottom: "10px", lineHeight: 1.5 }}>
+        Choisissez une ville, un leader qui <b>ne reçoit pas</b> (Non) et un membre qui <b>reçoit</b> (Oui) : un nouveau Bethel est créé chez l'hôte, avec le leader.
+        Deux leaders ne cohabitent jamais ; aucun groupe n'est supprimé.
+      </div>
+      <select value={ville} onChange={(e) => { setVille(e.target.value); setChefCle(""); setHoteCle(""); setMessage(""); }} style={{ ...champ, maxWidth: "320px", marginBottom: "12px" }}>
+        <option value="">— Choisir une ville —</option>
+        {analyse.villes.map((v) => <option key={v} value={v}>{v}</option>)}
+      </select>
+      {ville && (
+        <>
+          <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "12px" }}>
+            {colonne("Leaders « Non »", chefsVille, chefCle, setChefCle, "var(--brick)")}
+            {colonne("Hôtes « Oui »", hotesVille, hoteCle, setHoteCle, "var(--teal)")}
+          </div>
+          {chef && hote && (
+            <div style={{ border: "1px solid var(--plum)", borderRadius: "10px", padding: "14px", background: "var(--surface)", maxWidth: "520px" }}>
+              <div style={{ fontSize: "13px", fontWeight: 700, marginBottom: "8px", color: "var(--ink)" }}>
+                {chef.m.first_name} {chef.m.last_name} → chez {(hote.type === "member" ? hote.m : hote.sub).first_name} {(hote.type === "member" ? hote.m : hote.sub).last_name}
+              </div>
+              <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "8px" }}>{hote.adresse || "⚠️ Adresse de l'hôte manquante"}</div>
+              <input style={{ ...champ, marginBottom: "6px" }} placeholder="Numéro officiel Shekinah (ex. Bethel-Montréal-000058) — facultatif" value={form.numero} onChange={(e) => setForm((f) => ({ ...f, numero: e.target.value }))} />
+              <input style={{ ...champ, marginBottom: "6px" }} placeholder="Overseer" value={form.overseer} onChange={(e) => setForm((f) => ({ ...f, overseer: e.target.value }))} />
+              <input style={{ ...champ, marginBottom: "10px" }} placeholder="Ministre ordonné" value={form.ministre} onChange={(e) => setForm((f) => ({ ...f, ministre: e.target.value }))} />
+              <button disabled={enCours} onClick={former} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: "pointer" }}>
+                {enCours ? "Création…" : "Former le Bethel"}
+              </button>
+            </div>
+          )}
+        </>
+      )}
+      {message && <div style={{ marginTop: "12px", fontSize: "12.5px", color: message.startsWith("✅") ? "var(--teal)" : "var(--brick)" }}>{message}</div>}
+    </div>
+  );
+}
+
 function ReportsView({ submissions, bethels, zones, onChanged }) {
 
   
@@ -5349,11 +5549,11 @@ const [tab, setTab] = useState("hosting");
     <div>
       <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Rapports</h1>
       <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: "0 0 16px" }}>
-        {tab === "hosting" ? "Disponibilité pour héberger, par niveau de leadership." : tab === "gaps" ? "Membres avec des informations clés manquantes." : tab === "zonemismatch" ? "Bethels dont la zone ne correspond pas à leur adresse." : tab === "bethelsupervision" ? "Chaîne complète Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel, par état." : tab === "supervision" ? "Format calqué sur le classeur officiel, avec les coordonnées complètes de chaque niveau de la chaîne." : tab === "orgchart" ? "Hiérarchie complète, du Ministre Ordonné jusqu'au Responsable de Bethel." : "Membres dont l'adresse ne correspond pas à la zone de leur Bethel."}
+        {tab === "jumelage" ? "Envoyer un leader « Non » chez un membre « Oui » de la même ville : un nouveau Bethel est créé chez l'hôte." : tab === "hosting" ? "Disponibilité pour héberger, par niveau de leadership." : tab === "gaps" ? "Membres avec des informations clés manquantes." : tab === "zonemismatch" ? "Bethels dont la zone ne correspond pas à leur adresse." : tab === "bethelsupervision" ? "Chaîne complète Pasteur → Ministre → Superviseur → Responsable de Bethel → Bethel, par état." : tab === "supervision" ? "Format calqué sur le classeur officiel, avec les coordonnées complètes de chaque niveau de la chaîne." : tab === "orgchart" ? "Hiérarchie complète, du Ministre Ordonné jusqu'au Responsable de Bethel." : "Membres dont l'adresse ne correspond pas à la zone de leur Bethel."}
       </p>
 
-      <div style={{ display: "flex", gap: "6px", marginBottom: "20px" }}>
-        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "supervision", label: "Format de supervision des Bethels" }, { id: "orgchart", label: "Organigramme" }].map((t) => (
+      <div style={{ display: "flex", gap: "6px", marginBottom: "20px", flexWrap: "wrap" }}>
+        {[{ id: "hosting", label: "Disponibles pour héberger" }, { id: "gaps", label: "Données manquantes" }, { id: "zonemismatch", label: "Écarts de zone" }, { id: "membermismatch", label: "Écarts d'adresse membre" }, { id: "bethelsupervision", label: "Supervision des Bethels" }, { id: "supervision", label: "Format de supervision des Bethels" }, { id: "orgchart", label: "Organigramme" }, { id: "jumelage", label: "Jumelages" }].map((t) => (
           <button key={t.id} onClick={() => setTab(t.id)} style={{
             padding: "7px 16px", borderRadius: "8px", fontSize: "13px", fontWeight: 600,
             border: `1px solid ${tab === t.id ? "var(--plum)" : "var(--border)"}`,
@@ -5365,7 +5565,9 @@ const [tab, setTab] = useState("hosting");
         ))}
       </div>
 
-      {tab === "bethelsupervision" ? (
+      {tab === "jumelage" ? (
+        <JumelageView zones={zones} onChanged={onChanged} />
+      ) : tab === "bethelsupervision" ? (
         <BethelSupervisionReport />
       ) : tab === "supervision" ? (
         <BethelSupervisionFormatView />
