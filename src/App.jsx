@@ -3267,24 +3267,34 @@ function EnAttenteDeVille({ ville }) {
     return () => { annule = true; };
   }, [ville]);
   if (!lignes.length) return null;
-  return (
-    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)", padding: "12px 14px", marginBottom: "16px" }}>
-      <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "6px" }}>
-        En attente à {ville} ({lignes.length}) — soumissions pending, à approuver quand une maison est prête
-      </div>
-      {lignes.map((s) => (
-        <div key={s.submission_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "6px 0", borderTop: "1px solid var(--border)" }}>
+  const NIVEAUX_LEADER = ["hp_leader", "ananias", "overseer", "ordained_minister", "bethel_leader"];
+  const maisons = lignes.filter((x) => x.willing_to_host === true);
+  const leaders = lignes.filter((x) => x.willing_to_host !== true && NIVEAUX_LEADER.includes(x.leadership_level));
+  const membres = lignes.filter((x) => x.willing_to_host !== true && !NIVEAUX_LEADER.includes(x.leadership_level));
+  const pastille = (v) => v === true
+    ? <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Oui</span>
+    : <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", background: "rgba(162,59,51,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Non</span>;
+  const bloc = (titre, aide, liste) => liste.length === 0 ? null : (
+    <div style={{ marginBottom: "10px" }}>
+      <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>{titre} ({liste.length})</div>
+      <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", margin: "2px 0 4px" }}>{aide}</div>
+      {liste.map((x) => (
+        <div key={x.submission_id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "10px", padding: "6px 0", borderTop: "1px solid var(--border)" }}>
           <div>
-            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)" }}>{s.first_name} {s.last_name}</div>
-            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[LEADERSHIP_LABELS[s.leadership_level], s.phone, s.address].filter(Boolean).join(" · ")}</div>
+            <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--ink)" }}>{x.first_name} {x.last_name}</div>
+            <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[LEADERSHIP_LABELS[x.leadership_level], x.phone, x.address].filter(Boolean).join(" · ")}</div>
           </div>
-          {s.willing_to_host === true ? (
-            <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--teal)", background: "rgba(31,92,78,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Oui</span>
-          ) : s.willing_to_host === false ? (
-            <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--brick)", background: "rgba(162,59,51,0.10)", padding: "2px 9px", borderRadius: "999px" }}>Non</span>
-          ) : <span style={{ fontSize: "11px", color: "var(--ink-muted)" }}>—</span>}
+          {pastille(x.willing_to_host)}
         </div>
       ))}
+    </div>
+  );
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)", padding: "12px 14px", marginBottom: "16px" }}>
+      <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--ink)", marginBottom: "8px" }}>En attente à {ville} ({lignes.length})</div>
+      {bloc("Maisons « Oui » à approuver", "C'est la maison du membre qui est activée et approuvée, jamais celle d'un leader qui a dit Non.", maisons)}
+      {bloc("Leaders « Non » à placer", "Leur maison n'est pas utilisée : ils iront chez un membre « Oui » (Rapports → Jumelages). Gardés ici pour les retrouver s'ils changent d'avis.", leaders)}
+      {bloc("Membres « Non » en attente d'un Bethel", "À rattacher à un Bethel de la zone.", membres)}
     </div>
   );
 }
