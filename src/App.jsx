@@ -851,7 +851,7 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
         last_name: form.last_name,
         phone: form.phone,
         address: [form.address, form.city, form.postal_code].filter(Boolean).join(", "),
-        campus_id: campusId,
+        campus_id: campusId || CAMPUS_FIXE_ID,
         willing_to_host: form.willing_to_host === "yes",
         leadership_level: form.leadership_level,
         status: "pending",
@@ -912,6 +912,9 @@ function NewSubmissionModal({ campusId, onClose, onCreated }) {
 /* ------------------------------------------------------------------ */
 // Rôles capables de diriger leur propre Bethel (jamais un simple Membre --
 // règle métier : "le membre est un bébé, il ne peut pas avoir de numéro de Bethel").
+// Règle fixe : il n'existe qu'un seul campus, « TG Montreal ». Toute création de Bethel l'utilise.
+const CAMPUS_FIXE_ID = "34b41e1d-3aef-46da-9d7d-8797fd110475";
+const CAMPUS_FIXE_NOM = "TG Montreal";
 const ROLES_PEUVENT_DIRIGER = ["Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné"];
 
 // Devine le prochain hp_number disponible pour un nouveau Bethel, avec le nom de
@@ -1081,6 +1084,7 @@ function ManageMembersView({ bethels, onChanged }) {
       const nomComplet = `${form.first_name} ${form.last_name}`;
       const [nouveauBethel] = await supaPost("bethels", {
         hp_number: hpNumberPropose.trim(),
+        campus_id: CAMPUS_FIXE_ID,
         zone_id: zoneProposee.zone_id,
         leader_name: nomComplet,
         leader_role: form.role,
@@ -3131,7 +3135,7 @@ function DetailsBethelShekinah({ bethel, onReload }) {
       <div style={grille}>
         {ligne2("Church ID", bethel.church_id || bethel.hp_number, true)}
         {ligne2("Zone code", zone ? (zone.zone_code || zone.city_code) : "")}
-        {ligne2("Campus", campus)}
+        {ligne2("Campus", CAMPUS_FIXE_NOM)}
         {ligne2("Leader", aChef ? bethel.leader_name : "—")}
         {ligne2("Leader email", chef && chef.email)}
         {ligne2("Members", String(membres.length))}
@@ -5617,7 +5621,7 @@ function JumelageView({ zones, onChanged }) {
       const ancienHote = hote.type === "member" ? betParId[hote.m.bethel_id] : null;
       const zoneVille = zones.filter((z) => z.city_name === ville);
       const zoneId = (hote.type === "submission" && hote.sub.zone_id && villeDeZone[hote.sub.zone_id] === ville ? hote.sub.zone_id : (zoneVille[0] || {}).zone_id);
-      const campusId = (ancienHote && ancienHote.campus_id) || (ancienChef && ancienChef.campus_id) || (hote.type === "submission" ? hote.sub.campus_id : null);
+      const campusId = CAMPUS_FIXE_ID;
       if (!zoneId || !campusId) throw new Error("Zone ou campus introuvable pour ce Bethel.");
       const nouveauId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : null;
       const chaine = { ananias_name: nomChef, overseer_name: form.overseer.trim() || null, ordained_minister_name: form.ministre.trim() || null };
@@ -7044,7 +7048,7 @@ function BethelAdminPortalInner() {
 
       const [nouveauBethel] = await supaPost("bethels", {
         hp_number: nouveauNumero,
-        campus_id: submission.campus_id,
+        campus_id: CAMPUS_FIXE_ID,
         zone_id: zone.zone_id,
         leader_name: `${submission.first_name} ${submission.last_name}`,
         leader_role: submission.leadership_level === "hp_leader" ? "Bethel Leader" : (LEADERSHIP_LABELS[submission.leadership_level] || "Membre"),
