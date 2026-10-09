@@ -5388,7 +5388,16 @@ function JumelageView({ zones, onChanged }) {
       leadersFeuille.add(k);
       (adressesPrises[ka] = adressesPrises[ka] || []).push({ k, n: r.n_bethel });
     });
-    const deja = { chefs: 0, hotes: 0 };
+    const deja = { chefs: 0, hotes: 0, horsVille: 0 };
+    // Maisons déjà activées : adresse d'un Bethel officiel actif (la maison est prise).
+    const maisonsActives = new Set();
+    bet.forEach((x) => { if (x.status !== "inactive" && estBethelOfficielLigne(x)) { const ka = cleAdresse(x.address); if (ka) maisonsActives.add(ka); } });
+    const FSA_VILLE = { Terrebonne: ["J6V", "J6W", "J6X", "J6Y", "J6Z", "J7M"], Mascouche: ["J7K", "J7L"], Repentigny: ["J5Y", "J5Z", "J6A"] };
+    const horsVille = (v, adr) => {
+      const ok = FSA_VILLE[v]; if (!ok) return false;
+      const m = String(adr || "").toUpperCase().match(/\b([A-Z]\d[A-Z])\s?\d[A-Z]\d\b/);
+      return !!m && !ok.includes(m[1]);
+    };
     const subParCle = {};
     subs.forEach((x) => { const k = cle(x); if (!subParCle[k]) subParCle[k] = x; }); // la plus récente d'abord
     const ville_de = (p, k) => {
@@ -5413,7 +5422,9 @@ function JumelageView({ zones, onChanged }) {
         const adr = m.address || (sb && sb.address) || "";
         const prisPar = (adressesPrises[cleAdresse(adr)] || []).filter((x) => x.k !== k);
         const hoteDe = bet.find((x) => x.status !== "inactive" && normaliseNom(x.host_name || "") === k && normaliseNom(x.leader_name || "") !== k);
-        if (prisPar.length || hoteDe) deja.hotes++;
+        const dirigeOfficiel = b && b.status !== "inactive" && estBethelOfficielLigne(b) && normaliseNom(b.leader_name || "") === k;
+        if (horsVille(v, adr)) deja.horsVille++;
+        else if (prisPar.length || hoteDe || dirigeOfficiel || maisonsActives.has(cleAdresse(adr))) deja.hotes++;
         else hotes.push({ cle: k, type: "member", m, ville: v, origine: b ? b.hp_number : "", adresse: adr });
       }
     });
@@ -5422,7 +5433,8 @@ function JumelageView({ zones, onChanged }) {
     subs.forEach((x) => {
       const k = cle(x); if (vusSub.has(k)) return; vusSub.add(k);
       if (vus.has(k) || x.status !== "pending" || x.willing_to_host !== true || !x.zone_id) return;
-      if ((adressesPrises[cleAdresse(x.address)] || []).some((y) => y.k !== k)) { deja.hotes++; return; }
+      if (horsVille(villeDeZone[x.zone_id], x.address)) { deja.horsVille++; return; }
+      if ((adressesPrises[cleAdresse(x.address)] || []).some((y) => y.k !== k) || maisonsActives.has(cleAdresse(x.address))) { deja.hotes++; return; }
       hotes.push({ cle: k, type: "submission", sub: x, ville: villeDeZone[x.zone_id] || "", origine: "HP churches (réponses)", adresse: x.address || "" });
     });
     const villes = [...new Set([...chefs, ...hotes].map((x) => x.ville).filter(Boolean))].sort();
@@ -5545,6 +5557,8 @@ function JumelageView({ zones, onChanged }) {
           <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginBottom: "12px" }}>
             Les leaders et les hôtes déjà placés selon le Google Sheet (adresse du leader = adresse de l'hôte) ne sont pas proposés
             ({analyse.deja.chefs} leaders et {analyse.deja.hotes} hôtes masqués au total).
+            Une maison dont l'adresse est déjà celle d'un Bethel officiel actif n'est pas reproposée.
+            {analyse.deja.horsVille > 0 && ` ${analyse.deja.horsVille} hôte(s) masqué(s) : adresse hors de la ville (code postal d'une autre région).`}
           </div>
           {chef && hote && (
             <div style={{ border: "1px solid var(--plum)", borderRadius: "10px", padding: "14px", background: "var(--surface)", maxWidth: "520px" }}>
