@@ -2362,7 +2362,8 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
         </div>
 
         <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid var(--border)", overflowY: "auto", flex: 1 }}>
-          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", marginBottom: "10px" }}>
+          {!loading && <ChecklistPreparation bethel={bethel} membres={members.filter((m) => m.status !== "inactive")} />}
+          <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 10px" }}>
             {loading ? "Loading members…" : `${members.length} member${members.length === 1 ? "" : "s"}`}
           </div>
 
