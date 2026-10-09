@@ -1917,14 +1917,59 @@ function MemberProfileModal({ member, onClose, onSaved }) {
   );
 }
 
-function AddMemberForm({ bethelId, onAdded }) {
+// Chaîne de supervision d'un Bethel, lue sur ses membres actifs (aucune écriture).
+// Sert à faire hériter un nouveau membre de ananias / leader / overseer / ministre.
+async function chaineSupervisionDuBethel(bethelId) {
+  const rows = await supaGet("members", `bethel_id=eq.${bethelId}&status=eq.active&select=first_name,last_name,role,ananias_name,bethel_leader_name,overseer_name,ordained_minister_name`);
+  const nom = (m) => [m.first_name, m.last_name].filter(Boolean).join(" ").trim();
+  const parRole = (r) => rows.find((m) => m.role === r);
+  const chef = parRole("Bethel Leader") || parRole("Ananias") || rows.find((m) => m.ananias_name || m.bethel_leader_name || m.overseer_name || m.ordained_minister_name) || {};
+  const prem = (champ) => (rows.find((m) => m[champ]) || {})[champ] || "";
+  return {
+    ananias_name: (parRole("Ananias") && nom(parRole("Ananias"))) || chef.ananias_name || prem("ananias_name") || null,
+    bethel_leader_name: (parRole("Bethel Leader") && nom(parRole("Bethel Leader"))) || chef.bethel_leader_name || prem("bethel_leader_name") || null,
+    overseer_name: chef.overseer_name || (parRole("Overseer") && nom(parRole("Overseer"))) || prem("overseer_name") || null,
+    ordained_minister_name: chef.ordained_minister_name || (parRole("Ministre Ordonné") && nom(parRole("Ministre Ordonné"))) || prem("ordained_minister_name") || null,
+  };
+}
+
+// Contrôle de zone (règle de proximité ~15 min). Lecture seule.
+// Retourne { minutes, autreZone } ; minutes = null si Google ne trouve pas le trajet.
+async function controlerZoneMembre(bethel, adresse, codePostal) {
+  const complete = [adresse, codePostal].filter(Boolean).join(", ");
+  let autreZone = "";
+  try {
+    const zones = await supaGet("data_zones", "select=zone_id,city_name");
+    const texte = normaliseNom(complete);
+    const trouvee = zones.find((z) => z.zone_id !== bethel.zone_id && z.city_name && texte.includes(normaliseNom(z.city_name)));
+    autreZone = trouvee ? trouvee.city_name : "";
+  } catch (e) { /* facultatif */ }
+  let minutes = null;
+  try { minutes = await getDrivingMinutes(complete, bethel.address); } catch (e) { minutes = null; }
+  return { minutes, autreZone };
+}
+
+function AddMemberForm({ bethelId, bethel, onAdded }) {
+  const vide = { first_name: "", last_name: "", phone: "", email: "", address: "", postal_code: "", role: "Membre" };
   const [open, setOpen] = useState(false);
-  const [form, setForm] = useState({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre" });
+  const [form, setForm] = useState(vide);
   const [saving, setSaving] = useState(false);
+  const [alerte, setAlerte] = useState(null); // { minutes, autreZone } quand hors zone
   const inputStyle = {
     width: "100%", boxSizing: "border-box", padding: "7px 9px", marginBottom: "7px",
     border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", fontFamily: "var(--font-body)",
   };
+
+  async function enregistrer() {
+    const chaine = await chaineSupervisionDuBethel(bethelId).catch(() => ({}));
+    const payload = { ...form, bethel_id: bethelId, status: "active", ...chaine };
+    if (!payload.email) delete payload.email;
+    await supaPost("members", payload);
+    setForm(vide);
+    setAlerte(null);
+    setOpen(false);
+    onAdded();
+  }
 
   async function submit() {
     if (!form.first_name || !form.last_name) return;
@@ -1935,11 +1980,19 @@ function AddMemberForm({ bethelId, onAdded }) {
         setSaving(false);
         return;
       }
-      await supaPost("members", { ...form, bethel_id: bethelId, status: "active" });
-      setForm({ first_name: "", last_name: "", phone: "", address: "", postal_code: "", role: "Membre" });
-      setOpen(false);
-      onAdded();
+      // Contrôle de zone : seulement si on connaît l'adresse du membre ET celle du Bethel.
+      if (bethel && bethel.address && (form.address || form.postal_code) && !alerte) {
+        const ctl = await controlerZoneMembre(bethel, form.address, form.postal_code);
+        const horsZone = (ctl.minutes != null && ctl.minutes > LIMITE_MINUTES_PROXIMITE) || (ctl.minutes == null && ctl.autreZone);
+        if (horsZone) { setAlerte(ctl); setSaving(false); return; }
+      }
+      await enregistrer();
     } catch (e) { alert("Error: " + e.message); } finally { setSaving(false); }
+  }
+
+  async function ajouterQuandMeme() {
+    setSaving(true);
+    try { await enregistrer(); } catch (e) { alert("Error: " + e.message); } finally { setSaving(false); }
   }
 
   if (!open) {
@@ -1954,21 +2007,38 @@ function AddMemberForm({ bethelId, onAdded }) {
     );
   }
 
+  const maj = (champ, fn) => (e) => { setAlerte(null); setForm((f) => ({ ...f, [champ]: fn ? fn(e.target.value) : e.target.value })); };
   return (
     <div style={{ marginTop: "12px", padding: "12px", background: "var(--bg)", borderRadius: "8px" }}>
-      <input style={inputStyle} placeholder="First name" value={form.first_name} onChange={(e) => setForm((f) => ({ ...f, first_name: e.target.value }))} />
-      <input style={inputStyle} placeholder="Last name" value={form.last_name} onChange={(e) => setForm((f) => ({ ...f, last_name: e.target.value }))} />
-      <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={(e) => setForm((f) => ({ ...f, phone: formaterTelephone(e.target.value) }))} />
-      <input style={inputStyle} placeholder="Address" value={form.address} onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))} />
-      <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={(e) => setForm((f) => ({ ...f, postal_code: formaterCodePostal(e.target.value) }))} />
-      <select style={inputStyle} value={form.role} onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}>
+      <input style={inputStyle} placeholder="First name" value={form.first_name} onChange={maj("first_name")} />
+      <input style={inputStyle} placeholder="Last name" value={form.last_name} onChange={maj("last_name")} />
+      <input style={inputStyle} placeholder="Phone" value={form.phone} onChange={maj("phone", formaterTelephone)} />
+      <input style={inputStyle} placeholder="Email" type="email" value={form.email} onChange={maj("email")} />
+      <input style={inputStyle} placeholder="Address" value={form.address} onChange={maj("address")} />
+      <input style={inputStyle} placeholder="Postal code" value={form.postal_code} onChange={maj("postal_code", formaterCodePostal)} />
+      <select style={inputStyle} value={form.role} onChange={maj("role")}>
         {["Membre", "Ananias", "Bethel Leader", "Overseer", "Ministre Ordonné", "Assistant Pasteur", "Pasteur"].map((r) => <option key={r} value={r}>{r}</option>)}
       </select>
+      {alerte && (
+        <div style={{ marginBottom: "8px", padding: "10px 12px", borderRadius: "8px", background: "rgba(184,134,59,0.10)", border: "1px solid rgba(184,134,59,0.3)", fontSize: "12.5px", color: "var(--ink)", lineHeight: 1.5 }}>
+          ⚠️ Attention : l'adresse de ce membre est située {alerte.autreZone ? `à ${alerte.autreZone}` : "hors de la zone de ce Bethel"}
+          {alerte.minutes != null ? ` (≈ ${alerte.minutes} min de route)` : ""}. Conformément à la règle de proximité (~{LIMITE_MINUTES_PROXIMITE} min),
+          ce membre devrait être orienté vers un Bethel de sa zone.
+          <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
+            <button disabled={saving} onClick={ajouterQuandMeme} style={{ padding: "6px 12px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
+              Ajouter quand même
+            </button>
+            <button onClick={() => setAlerte(null)} style={{ padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>
+              Corriger l'adresse
+            </button>
+          </div>
+        </div>
+      )}
       <div style={{ display: "flex", gap: "8px" }}>
         <button disabled={saving} onClick={submit} style={{ padding: "7px 14px", borderRadius: "6px", border: "none", background: "var(--plum)", color: "#fff", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}>
-          {saving ? "Adding…" : "Add"}
+          {saving ? "Vérification…" : "Add"}
         </button>
-        <button onClick={() => setOpen(false)} style={{ padding: "7px 14px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
+        <button onClick={() => { setOpen(false); setAlerte(null); }} style={{ padding: "7px 14px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)", fontSize: "12px", cursor: "pointer" }}>Cancel</button>
       </div>
     </div>
   );
@@ -2056,7 +2126,8 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
     try {
       if (candidat.kind === "member") {
         // Membre déjà actif ailleurs : on le transfère simplement dans ce Bethel.
-        await supaPatch("members", `member_id=eq.${candidat.member_id}`, { bethel_id: bethel.bethel_id });
+        const chaine = await chaineSupervisionDuBethel(bethel.bethel_id).catch(() => ({}));
+        await supaPatch("members", `member_id=eq.${candidat.member_id}`, { bethel_id: bethel.bethel_id, ...chaine });
         setCandidats((c) => c.filter((x) => (x.kind === "member" ? x.member_id : x.submission_id) !== cleId));
       } else {
         await supaPost("members", {
@@ -2065,6 +2136,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
           address: candidat.address,
           role: LEADERSHIP_LABELS[candidat.leadership_level] || "Membre",
           willing_to_host: false, status: "active",
+          ...(await chaineSupervisionDuBethel(bethel.bethel_id).catch(() => ({}))),
         });
         await supaPatch("submissions", `submission_id=eq.${candidat.submission_id}`, {
           status: "approved", zone_id: bethel.zone_id, reviewed_at: new Date().toISOString(),
@@ -2307,7 +2379,7 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
             />
           ))}
 
-          <AddMemberForm bethelId={bethel.bethel_id} onAdded={loadMembers} />
+          <AddMemberForm bethelId={bethel.bethel_id} bethel={bethel} onAdded={loadMembers} />
           <FindNearbyMembersPanel bethel={bethel} onAssigned={() => { loadMembers(); onChanged(); }} />
         </div>
       </div>
@@ -3071,6 +3143,8 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
                   <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{[m.role, m.phone, m.postal_code].filter(Boolean).join(" · ")}</div>
                 </div>
               ))}
+            <AddMemberForm bethelId={bethel.bethel_id} bethel={bethel} onAdded={() => { chargerMembres(); onReload(); }} />
+            <FindNearbyMembersPanel bethel={bethel} onAssigned={() => { chargerMembres(); onReload(); }} />
             <button onClick={() => { onClose(); onOpenDetail(bethel); }} style={{
               marginTop: "16px", padding: "8px 14px", borderRadius: "8px", border: "1px solid var(--plum)",
               background: "transparent", color: "var(--plum)", fontSize: "13px", fontWeight: 600, cursor: "pointer",
@@ -3080,7 +3154,7 @@ function BethelSidePanel({ bethel, mode, bethels, onClose, onReload, onOpenDetai
           </>
         )}
 
-        {mode === "ajouter" && <AddMemberForm bethelId={bethel.bethel_id} onAdded={() => { onReload(); onClose(); }} />}
+        {mode === "ajouter" && <AddMemberForm bethelId={bethel.bethel_id} bethel={bethel} onAdded={() => { onReload(); onClose(); }} />}
 
         {mode === "proximite" && (
           <>
