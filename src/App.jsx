@@ -1038,6 +1038,21 @@ function ReassignPanel({ membre, bethels, zones, bethelActuelId, onDone, onClose
   );
 }
 
+// Filtre de recherche rapide de membres : chaque mot tapé doit se retrouver dans
+// le prénom, le nom, le courriel OU le téléphone (ex. "tiker213" → courriel,
+// "Kerlange Delphin" → prénom + nom).
+function filtreRechercheMembres(texte) {
+  const mots = String(texte || "").trim().split(/\s+/)
+    .map((m) => m.replace(/[(),*%]/g, "")).filter(Boolean);
+  const unMot = (m) => {
+    const v = encodeURIComponent(m);
+    return `or(first_name.ilike.*${v}*,last_name.ilike.*${v}*,email.ilike.*${v}*,phone.ilike.*${v}*)`;
+  };
+  if (mots.length === 0) return "";
+  if (mots.length === 1) return `or=(${unMot(mots[0]).slice(3)}`;
+  return `and=(${mots.map(unMot).join(",")})`;
+}
+
 function ManageMembersView({ bethels, onChanged }) {
   const [form, setForm] = useState({
     first_name: "", last_name: "", phone: "", email: "", gender: "", decision: "",
@@ -1296,7 +1311,7 @@ function ManageMembersView({ bethels, onChanged }) {
     try {
       const parNom = await supaGet(
         "members",
-        `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*,phone.ilike.*${encodeURIComponent(q)}*)&status=eq.active&order=first_name.asc&limit=40`
+        `${filtreRechercheMembres(q)}&status=eq.active&order=first_name.asc&limit=40`
       );
       setResults(parNom);
     } catch (e) {
@@ -1597,7 +1612,7 @@ function ManageMembersView({ bethels, onChanged }) {
         <input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Chercher par nom ou téléphone…"
+          placeholder="Chercher par nom, courriel ou téléphone…"
           style={{
             width: "100%", boxSizing: "border-box", padding: "9px 10px 9px 32px",
             border: "1px solid var(--border)", borderRadius: "8px", fontSize: "14px", outline: "none",
@@ -4841,7 +4856,7 @@ function BethelSupervisionReport() {
       const qBrut = rechercheAncien.trim().toLowerCase().replace(/\s+/g, "");
       if (q.length < 2 && qBrut.length < 3) return [];
       return membresAnciens.filter((m) => {
-        const texte = normaliseNom(`${m.first_name} ${m.last_name} ${m.city || ""} ${m.address || ""}`);
+        const texte = normaliseNom(`${m.first_name} ${m.last_name} ${m.email || ""} ${m.phone || ""} ${m.city || ""} ${m.address || ""}`);
         const cp = (m.postal_code || "").toLowerCase().replace(/\s+/g, "");
         return (q.length >= 2 && texte.includes(q)) || (qBrut.length >= 3 && cp.startsWith(qBrut));
       }).slice(0, 30);
@@ -6296,7 +6311,7 @@ function SearchMembersView({ bethels, onOpenBethel }) {
         // 1) Cherche par nom/téléphone, comme avant
         const parNom = await supaGet(
           "members",
-          `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*,phone.ilike.*${encodeURIComponent(q)}*)&order=first_name.asc&limit=40`
+          `${filtreRechercheMembres(q)}&order=first_name.asc&limit=40`
         );
 
         // 2) Cherche aussi si le texte tapé correspond à une ville/zone --
@@ -6342,7 +6357,7 @@ function SearchMembersView({ bethels, onOpenBethel }) {
           autoFocus
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Type a name, phone number, or city…"
+          placeholder="Nom, courriel, téléphone ou ville…"
           style={{
             width: "100%", boxSizing: "border-box", padding: "9px 10px 9px 32px",
             border: "1px solid var(--border)", borderRadius: "8px", fontSize: "14px", outline: "none",
@@ -6872,7 +6887,7 @@ function AddDevotionManualPanel({ onAdded }) {
       try {
         const data = await supaGet(
           "members",
-          `or=(first_name.ilike.*${encodeURIComponent(q)}*,last_name.ilike.*${encodeURIComponent(q)}*)&status=eq.active&order=first_name.asc&limit=15`
+          `${filtreRechercheMembres(q)}&status=eq.active&order=first_name.asc&limit=15`
         );
         setResultats(data);
       } catch (e) {
