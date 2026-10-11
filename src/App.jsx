@@ -5947,6 +5947,11 @@ function JumelageView({ zones, onChanged }) {
       const sb = subParCle[k];
       const zSub = sb && sb.zone_id ? villeDeZone[sb.zone_id] : null;
       const b = betParId[p.bethel_id];
+      // L'adresse réelle du membre (code postal) prime sur la zone de son ancien groupe :
+      // un membre de Repentigny rangé dans un ancien groupe « Ville-Marie » doit apparaître à Repentigny.
+      const mCp = String(`${p.postal_code || ""} ${p.address || ""}`).toUpperCase().match(/\b([A-Z]\d[A-Z])\s?\d[A-Z]\d\b/);
+      const villeCp = mCp ? Object.keys(FSA_VILLE).find((v) => FSA_VILLE[v].includes(mCp[1])) : null;
+      if (villeCp && Object.values(villeDeZone).includes(villeCp)) return villeCp;
       return zSub || (b && villeDeZone[b.zone_id]) || "";
     };
     const chefs = []; const hotes = []; const vus = new Set(); const chefsMasques = [];
