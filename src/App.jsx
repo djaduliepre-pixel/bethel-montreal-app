@@ -207,6 +207,51 @@ async function getDrivingMinutes(originAddress, destAddress) {
   });
 }
 
+
+// ---------------------------------------------------------------------------
+// Verrou de région : une suggestion de proximité ne doit JAMAIS traverser les grandes régions
+// (ex. Shawinigan / Mauricie vs Grand Montréal). Priorité : code postal > ville écrite > nom de zone.
+// Retourne "MAURICIE", "QUEBEC", "GRAND_MTL", "J2"... ou null si on ne peut pas savoir.
+// ---------------------------------------------------------------------------
+function regionGeo(adresse, zoneNom) {
+  const t = String(adresse || "");
+  const m = t.toUpperCase().match(/\b([A-Z]\d[A-Z])\s?\d[A-Z]\d\b/);
+  if (m) {
+    const f = m[1];
+    if (f[0] === "G") return (f === "G0X" || /^G[89]/.test(f)) ? "MAURICIE" : "QUEBEC";
+    if (f[0] === "H") return "GRAND_MTL";
+    if (f[0] === "J") {
+      if (/^J[89]/.test(f)) return "OUTAOUAIS";
+      if (/^J[1]/.test(f)) return "ESTRIE";
+      if (/^J[2]/.test(f)) return "J2";
+      if (/^J[0]/.test(f)) return "J0";
+      return "GRAND_MTL"; // J3 à J7 : Rive-Sud, Rive-Nord, Lanaudière, Laurentides proches
+    }
+    return f[0];
+  }
+  const parTexte = (x) => {
+    const n = normaliseNom(x || "");
+    if (!n) return null;
+    if (/shawinigan|trois riv|mauricie|grand mere|cap de la madeleine|la tuque|louiseville/.test(n)) return "MAURICIE";
+    if (/winnipeg|manitoba/.test(n)) return "R";
+    if (/moncton|brunswick|fredericton/.test(n)) return "E";
+    if (/quebec city|^region |sainte foy|beauport|levis|charlevoix/.test(n)) return "QUEBEC";
+    if (/montreal|laval|repentigny|terrebonne|mascouche|longueuil|brossard|rive sud|lorraine|beauharnois|epiphanie|charles borromee|therese|boisbriand|blainville|ile perrot|dorval|kirkland|west island|pointe claire|anjou|verdun|lasalle|lachine|outremont|saint leonard|saint laurent|pierrefonds|rosemont|villeray|saint michel|ahuntsic|plateau|sud ouest|ville marie|hochelaga|montreal nord|montreal est|pointe aux trembles|riviere des prairies|parc extension|cote des neiges|dollard|cite des jeunes|saint lambert|candiac|la prairie|chambly|saint jean sur/.test(n)) return "GRAND_MTL";
+    return null;
+  };
+  return parTexte(t) || parTexte(zoneNom);
+}
+
+// Ajoute la ville de contexte quand l'adresse n'a ni code postal ni ville (ex. « avenue Brunet »),
+// sinon Google la place n'importe où au Canada, souvent à côté de l'origine.
+function adresseAvecContexte(adresse, villeContexte) {
+  const a = String(adresse || "").trim();
+  if (!a || !villeContexte) return a;
+  const aUnCP = /\b[A-Za-z]\d[A-Za-z]\s?\d[A-Za-z]\d\b/.test(a);
+  if (aUnCP || normaliseNom(a).includes(normaliseNom(villeContexte))) return a;
+  return `${a}, ${villeContexte}, QC`;
+}
+
 /* ------------------------------------------------------------------ */
 /* Petits blocs visuels                                               */
 /* ------------------------------------------------------------------ */
@@ -2258,6 +2303,7 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
   const [loading, setLoading] = useState(false);
   const [candidats, setCandidats] = useState([]);
   const [assigningId, setAssigningId] = useState(null);
+  const [nbEcartes, setNbEcartes] = useState(0);
 
   async function lancerRecherche() {
     if (!bethel.address) return;
@@ -2265,11 +2311,13 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
     setOpen(true);
     try {
       const [pendants, membresActifs, bethelsTous, zonesToutes] = await Promise.all([
-        supaGet("submissions", "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level"),
+        supaGet("submissions", "status=eq.pending&willing_to_host=eq.false&select=submission_id,first_name,last_name,phone,address,leadership_level,zone_id"),
         supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,phone,address,bethel_id"),
         supaGet("bethels", "select=bethel_id,zone_id"),
-        supaGet("data_zones", "select=zone_id,zone_name"),
+        supaGet("data_zones", "select=zone_id,zone_name,city_name"),
       ]);
+      const villeParZoneId = Object.fromEntries(zonesToutes.map((z) => [z.zone_id, z.city_name]));
+      const regionBethel = regionGeo(bethel.address, zonesToutes.find((z) => z.zone_id === bethel.zone_id)?.zone_name);
       const zoneParBethelId = Object.fromEntries(bethelsTous.map((b) => [b.bethel_id, b.zone_id]));
       const nomZoneParId = Object.fromEntries(zonesToutes.map((z) => [z.zone_id, z.zone_name]));
 
@@ -2300,11 +2348,22 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
           zoneActuelle: nomZoneParId[zoneParBethelId[m.bethel_id]] || "",
         }));
 
-      const candidatsAvecAdresse = [...pendantsFiltres, ...membresMalPlaces].filter((c) => c.address);
+      // VERROU DE RÉGION : on ne calcule rien pour quelqu'un d'une autre grande région que le Bethel
+      // (ex. Montréal-Nord / Île-Perrot pour un Bethel de Shawinigan). Si la région du candidat est
+      // inconnue (ni code postal, ni ville, ni zone), on l'écarte aussi : mieux vaut ne rien proposer.
+      const tous = [...pendantsFiltres, ...membresMalPlaces].filter((c) => c.address);
+      const zoneNomDe = (c) => c.kind === "member" ? nomZoneParId[zoneParBethelId[c.bethel_id]] : nomZoneParId[c.zone_id];
+      const villeDe = (c) => c.kind === "member" ? villeParZoneId[zoneParBethelId[c.bethel_id]] : villeParZoneId[c.zone_id];
+      const dansRegion = tous.filter((c) => {
+        const r = regionGeo(c.address, zoneNomDe(c));
+        return regionBethel ? r === regionBethel : r !== null;
+      });
+      setNbEcartes(tous.length - dansRegion.length);
+      const candidatsAvecAdresse = dansRegion;
       const avecDistance = await Promise.all(
         candidatsAvecAdresse.map(async (c) => {
           try {
-            const minutes = await getDrivingMinutes(c.address, bethel.address);
+            const minutes = await getDrivingMinutes(adresseAvecContexte(c.address, villeDe(c)), bethel.address);
             return { ...c, minutes, error: null };
           } catch (e) {
             return { ...c, minutes: null, error: e.message };
@@ -2316,7 +2375,10 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
         if (b.minutes == null) return -1;
         return a.minutes - b.minutes;
       });
-      setCandidats(avecDistance); // montre tout le monde, personne n'est coupé silencieusement
+      // RÈGLE STRICTE : seuls les candidats réellement à ${LIMITE_MINUTES_PROXIMITE} min ou moins sont proposés.
+      const eligibles = avecDistance.filter((c) => c.minutes != null && c.minutes <= LIMITE_MINUTES_PROXIMITE);
+      setNbEcartes((n) => n + (avecDistance.length - eligibles.length));
+      setCandidats(eligibles);
     } catch (e) {
       setCandidats([]);
     } finally {
@@ -2384,7 +2446,10 @@ function FindNearbyMembersPanel({ bethel, onAssigned, autoStart = false }) {
           {loading ? (
             <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Calcul des temps de trajet…</div>
           ) : candidats.length === 0 ? (
-            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>Aucune soumission en attente ni membre mal placé avec une adresse exploitable.</div>
+            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", lineHeight: 1.5 }}>
+              Aucun membre éligible dans ce secteur (moins de {LIMITE_MINUTES_PROXIMITE} min).
+              {nbEcartes > 0 && <> {nbEcartes} personne(s) écartée(s) : région différente, adresse incomplète ou trajet trop long.</>}
+            </div>
           ) : (
             <>
               {(() => {
