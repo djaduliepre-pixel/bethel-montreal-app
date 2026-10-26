@@ -3854,8 +3854,23 @@ function EnAttenteDeVille({ ville }) {
         const zones = await supaGet("data_zones", `city_name=eq.${encodeURIComponent(ville)}&select=zone_id`);
         if (!zones.length) { if (!annule) setLignes([]); return; }
         const ids = zones.map((z) => z.zone_id).join(",");
-        const subs = await supaGet("submissions", `status=eq.pending&zone_id=in.(${ids})&select=submission_id,first_name,last_name,phone,address,willing_to_host,leadership_level,submitted_at&order=submitted_at.desc`);
-        if (!annule) setLignes(subs);
+        const subs = await supaGet("submissions", `status=in.(pending,approved)&zone_id=in.(${ids})&select=submission_id,first_name,last_name,phone,address,willing_to_host,leadership_level,status,submitted_at&order=submitted_at.desc`);
+        // Exclure les personnes déjà membres d'un Bethel officiel actif (elles sont déjà placées).
+        let dejaPlaces = new Set();
+        try {
+          const bets = await supaGetTout("bethels", "select=bethel_id,hp_number,bethel_name_officiel,status");
+          const officielsActifs = new Set(bets.filter((b) => estBethelOfficielLigne(b) && String(b.status || "").toLowerCase() !== "inactive").map((b) => b.bethel_id));
+          const mems = await supaGetTout("members", "select=first_name,last_name,bethel_id,status");
+          mems.forEach((m) => { if (officielsActifs.has(m.bethel_id) && String(m.status || "active").toLowerCase() === "active") dejaPlaces.add(normaliseNom(`${m.first_name} ${m.last_name}`)); });
+        } catch (e) { dejaPlaces = new Set(); }
+        const vus = new Set();
+        const utiles = subs.filter((x) => {
+          const cle = normaliseNom(`${x.first_name} ${x.last_name}`);
+          if (dejaPlaces.has(cle) || vus.has(cle)) return false;
+          vus.add(cle);
+          return true;
+        });
+        if (!annule) setLignes(utiles);
       } catch (e) { if (!annule) setLignes([]); }
     })();
     return () => { annule = true; };
