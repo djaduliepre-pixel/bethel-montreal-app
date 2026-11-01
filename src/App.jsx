@@ -2527,6 +2527,8 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
   const [changingZone, setChangingZone] = useState(false);
   const [zoneQuery, setZoneQuery] = useState("");
   const [profileFor, setProfileFor] = useState(null);
+  const [apprenti, setApprenti] = useState("");
+  const [apprentiDispo, setApprentiDispo] = useState(true);
 
   async function loadMembers() {
     setLoading(true);
@@ -2534,6 +2536,19 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
       const data = await supaGet("members", `bethel_id=eq.${bethel.bethel_id}&order=role.asc,first_name.asc`);
       setMembers(data);
     } catch (e) { setError(e.message); } finally { setLoading(false); }
+    // Apprenti du Bethel (colonne ajoutée : si elle n'existe pas, la section se cache sans rien casser).
+    try {
+      const r = await supaGet("bethels", `bethel_id=eq.${bethel.bethel_id}&select=apprentice_name`);
+      setApprenti((r[0] && r[0].apprentice_name) || "");
+      setApprentiDispo(true);
+    } catch (e) { setApprentiDispo(false); }
+  }
+
+  async function saveApprenti(nom) {
+    try {
+      await supaPatch("bethels", `bethel_id=eq.${bethel.bethel_id}`, { apprentice_name: nom || null });
+      setApprenti(nom);
+    } catch (e) { alert("Error: " + e.message); }
   }
 
   useEffect(() => { loadMembers(); }, [bethel.bethel_id]);
@@ -2629,6 +2644,38 @@ function BethelDetailModal({ bethel, bethels, zones, onClose, onChanged }) {
         </div>
 
         <div style={{ marginTop: "18px", paddingTop: "16px", borderTop: "1px solid var(--border)", overflowY: "auto", flex: 1 }}>
+          {!loading && (() => {
+            const actifs = members.filter((m) => m.status !== "inactive");
+            const SEUIL_DIVISION = 15;
+            const aDiviser = actifs.length >= SEUIL_DIVISION;
+            const candidats = actifs.filter((m) => `${m.first_name} ${m.last_name}`.trim() !== (bethel.leader_name || "").trim());
+            return (
+              <>
+                {aDiviser && (
+                  <div style={{ background: "rgba(162,59,51,0.08)", border: "1px solid rgba(162,59,51,0.25)", borderRadius: "8px", padding: "8px 10px", marginBottom: "10px", fontSize: "12.5px", color: "var(--brick)" }}>
+                    ⚠️ Ce Bethel a {actifs.length} membres actifs : il est temps de préparer un deuxième Bethel (division). {apprenti ? `Apprenti : ${apprenti}.` : "Choisissez d'abord un apprenti."}
+                  </div>
+                )}
+                {apprentiDispo && (
+                  <div style={{ marginBottom: "12px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap", fontSize: "12.5px" }}>
+                    <span style={{ fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", fontSize: "11.5px", letterSpacing: "0.03em" }}>Apprenti</span>
+                    <select
+                      value={apprenti}
+                      onChange={(e) => saveApprenti(e.target.value)}
+                      style={{ padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px", background: "var(--bg)", maxWidth: "260px" }}
+                    >
+                      <option value="">Aucun apprenti</option>
+                      {apprenti && !candidats.some((m) => `${m.first_name} ${m.last_name}`.trim() === apprenti) && <option value={apprenti}>{apprenti}</option>}
+                      {candidats.map((m) => {
+                        const nom = `${m.first_name} ${m.last_name}`.trim();
+                        return <option key={m.member_id} value={nom}>{nom}</option>;
+                      })}
+                    </select>
+                  </div>
+                )}
+              </>
+            );
+          })()}
           {!loading && <ChecklistPreparation bethel={bethel} membres={members.filter((m) => m.status !== "inactive")} />}
           <div style={{ fontSize: "12px", fontWeight: 600, color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em", margin: "14px 0 10px" }}>
             {loading ? "Loading members…" : `${members.length} member${members.length === 1 ? "" : "s"}`}
