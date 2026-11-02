@@ -6874,7 +6874,7 @@ function cmCalcul(p) {
 }
 
 const CM_VIDE = {
-  id: null, prenom: "", nom: "", telephone: "", courriel: "", sexe: "", campus: "Montréal", n_bethel: "",
+  id: null, prenom: "", nom: "", telephone: "", courriel: "", adresse: "", sexe: "", campus: "Montréal", n_bethel: "",
   date_demande: "", fof: [false, false, false, false, false], p7: [false, false, false, false, false],
   sl: [false, false, false, false, false, false], classe_bapteme: false, age_13: "", bapteme: "", date_bapteme: "",
   graduation: "Pas encore", formulaire: false, ministere: "", lien_par: "", date_lien: "", dernier_suivi: "",
@@ -6955,17 +6955,32 @@ function CmFiche({ initial, chaineParBethel, nBethels, onClose, onSaved }) {
           <CmChamp label="Nom *">{txt("nom")}</CmChamp>
           <CmChamp label="Téléphone">{txt("telephone")}</CmChamp>
           <CmChamp label="Courriel">{txt("courriel")}</CmChamp>
+          <CmChamp label="Adresse (rue, ville, code postal)" large>{txt("adresse", "1234 rue Exemple, Montréal, H1A 1A1")}</CmChamp>
           <CmChamp label="Sexe">{sel("sexe")}</CmChamp>
           <CmChamp label="Campus">{sel("campus")}</CmChamp>
 
-          {section("Bethel et chaîne de supervision")}
+          {section("Rattachement")}
           <CmChamp label="N° Bethel" large>
             <input list="cm-bethels" value={f.n_bethel || ""} placeholder="Bethel-Montréal-000059" onChange={(e) => set("n_bethel", e.target.value)} style={cmInput} />
             <datalist id="cm-bethels">{nBethels.map((b) => <option key={b} value={b} />)}</datalist>
           </CmChamp>
-          <div style={{ flex: "1 1 100%", fontSize: "13px", color: "var(--ink)" }}>
-            {chaine ? <>Bethel Leader : <b>{chaine.leader || "–"}</b> · Overseer : <b>{chaine.overseer || "–"}</b> · Ministre : <b>{chaine.ministre || "–"}</b></>
-              : <span style={{ color: "var(--ink-muted)" }}>{f.n_bethel ? "N° Bethel introuvable dans la liste des Bethels." : "Aucun Bethel pour le moment."}</span>}
+          <div style={{ flex: "1 1 100%", minWidth: 0 }}>
+            {chaine ? (
+              <div style={{ border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)", padding: "12px 14px" }}>
+                <div style={{ fontFamily: "var(--font-display)", fontSize: "17px", fontWeight: 700 }}>{chaine.n_bethel}</div>
+                <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "2px", fontFamily: "var(--font-mono)" }}>
+                  {chaine.campus || "–"} · {chaine.code || "Code église à compléter"}
+                </div>
+                <div style={{ fontSize: "13px", marginTop: "8px" }}><span style={{ color: "var(--ink-muted)" }}>Adresse du Bethel :</span> <b>{chaine.adresse || "–"}</b></div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: "6px 14px", fontSize: "13px", marginTop: "8px" }}>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Ministre :</span> <b>{chaine.ministre || "–"}</b></div>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Overseer :</span> <b>{chaine.overseer || "–"}</b></div>
+                  <div><span style={{ color: "var(--ink-muted)" }}>Bethel Leader :</span> <b>{chaine.leader || "–"}</b>{chaine.l_tel ? ` · ${chaine.l_tel}` : ""}</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>{f.n_bethel ? "N° Bethel introuvable dans la liste des Bethels." : "Aucun Bethel pour le moment."}</div>
+            )}
           </div>
 
           {section("Classes terminées")}
@@ -7027,13 +7042,20 @@ function ClasseMembreView() {
   async function charger() {
     setLoading(true); setErreur("");
     try {
-      const [rows, sup] = await Promise.all([
+      const [rows, sup, bet] = await Promise.all([
         supaGetTout("classe_membre", "select=*&order=id.asc"),
-        supaGetTout("supervision_sheet", "actif=eq.true&select=n_bethel,leader,overseer,ministre").catch(() => []),
+        supaGetTout("supervision_sheet", "actif=eq.true&select=n_bethel,campus,leader,l_tel,l_adresse,overseer,ministre,bethel_id").catch(() => []),
+        supaGetTout("bethels", "select=bethel_id,church_id,address").catch(() => []),
       ]);
       setListe(rows);
       const m = {};
-      sup.forEach((s) => { if (s.n_bethel) m[s.n_bethel.trim()] = s; });
+      const parId = Object.fromEntries(bet.map((b) => [b.bethel_id, b]));
+      sup.forEach((s) => {
+        if (!s.n_bethel) return;
+        const b = parId[s.bethel_id] || {};
+        const code = /^TG-/.test(b.church_id || "") ? b.church_id : "";
+        m[s.n_bethel.trim()] = { ...s, n_bethel: s.n_bethel.trim(), code, adresse: s.l_adresse || b.address || "" };
+      });
       setChaine(m);
     } catch (e) { setErreur(e.message); } finally { setLoading(false); }
   }
@@ -7132,7 +7154,7 @@ function ClasseMembreView() {
                   <td style={{ padding: "9px 12px" }}>{p._c.p7}/5</td>
                   <td style={{ padding: "9px 12px" }}>{p._c.sl}/6</td>
                   <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: p._c.etape === "6. Prêt(e) à graduer" ? "var(--teal)" : p._c.etape === "Gradué(e)" ? "var(--plum)" : "var(--ink)", fontWeight: 600 }}>{p._c.etape}</td>
-                  <td style={{ padding: "9px 12px", fontSize: "12px" }}>{p.n_bethel || <span style={{ color: "var(--ink-muted)" }}>–</span>}{p._ch && <div style={{ color: "var(--ink-muted)" }}>{p._ch.overseer}</div>}</td>
+                  <td style={{ padding: "9px 12px", fontSize: "12px" }}>{p.n_bethel || <span style={{ color: "var(--ink-muted)" }}>–</span>}{p._ch && <div style={{ color: "var(--ink-muted)" }}>{p._ch.code ? p._ch.code + " · " : ""}Ov. {p._ch.overseer || "–"}</div>}</td>
                   <td style={{ padding: "9px 12px", fontSize: "12px", color: "var(--ink-muted)" }}>{p._c.etape === "Gradué(e)" ? "" : (p._c.manque.join(", ") || "Rien : prêt(e)")}</td>
                 </tr>
               ))}
