@@ -7187,6 +7187,22 @@ const plFsa = (t) => { const m = String(t || "").toUpperCase().match(/\b([A-Z]\d
 const plWa = (tel, txt) => { let n = String(tel || "").replace(/\D/g, ""); if (n.length === 10) n = "1" + n; return `https://wa.me/${n}?text=${encodeURIComponent(txt)}`; };
 const plQuand = (jour, heure) => `${String(jour || "dimanche").toLowerCase()}${heure ? " à " + String(heure).replace("h", " h ").trim() : ""}`;
 
+// Cherche la personne dans la Classe de membre (registre) par nom, ou par téléphone.
+async function plChercherClasse(prenom, nom, tel) {
+  const p = prenom.trim(), n = nom.trim(), chiffres = String(tel || "").replace(/\D/g, "");
+  const enc = (x) => encodeURIComponent(x.replace(/[(),*]/g, " ").trim());
+  let rows = [];
+  if (p.length >= 2 && n.length >= 2) {
+    rows = await supaGet("classe_membre", `or=(and(prenom.ilike.${enc(p)},nom.ilike.${enc(n)}),and(prenom.ilike.${enc(n)},nom.ilike.${enc(p)}))&select=*&limit=5`);
+  }
+  if (!rows.length && chiffres.length >= 10) {
+    const fin = chiffres.slice(-4);
+    rows = (await supaGet("classe_membre", `telephone=ilike.*${fin}*&select=*&limit=50`))
+      .filter((r) => String(r.telephone || "").replace(/\D/g, "").endsWith(chiffres.slice(-10)));
+  }
+  return rows.length === 1 ? rows[0] : null;
+}
+
 function plSuivi(p) {
   const jours = (Date.now() - new Date(p.created_at).getTime()) / 86400000;
   if (p.present) return { t: "✓ Intégré(e) dans son Bethel", c: "var(--teal)" };
@@ -7208,7 +7224,28 @@ function PlacementView({ bethels, onChanged }) {
   const [fait, setFait] = useState(null);
   const [chaine, setChaine] = useState({});
   const [suivis, setSuivis] = useState([]);
+  const [classe, setClasse] = useState(null); // fiche trouvée dans la Classe de membre
   const nbMembres = useNombreMembresParBethel();
+
+  // Dès que le nom ou le téléphone est écrit : on cherche la personne dans la
+  // Classe de membre et on complète ce qui manque (courriel, téléphone, adresse).
+  useEffect(() => {
+    let annule = false;
+    const t = setTimeout(async () => {
+      try {
+        const r = await plChercherClasse(f.prenom, f.nom, f.telephone);
+        if (annule) return;
+        setClasse(r);
+        if (r) setF((x) => ({
+          ...x,
+          courriel: x.courriel || r.courriel || "",
+          telephone: x.telephone || r.telephone || "",
+          adresse: x.adresse || r.adresse || "",
+        }));
+      } catch (e) { if (!annule) setClasse(null); }
+    }, 500);
+    return () => { annule = true; clearTimeout(t); };
+  }, [f.prenom, f.nom, f.telephone]);
 
   async function chargerSuivis() {
     try {
@@ -7269,6 +7306,14 @@ function PlacementView({ bethels, onChanged }) {
         bethel_id: choix.bethel.bethel_id, n_bethel: choix.n_bethel, leader: choix.leader, leader_tel: choix.tel || null,
         minutes: choix.minutes, place_par: placePar, member_id: m ? m.member_id : null,
       });
+      // La fiche de la Classe de membre reçoit son N° Bethel (et son adresse si elle manquait)
+      if (classe) {
+        try {
+          await supaPatch("classe_membre", `id=eq.${encodeURIComponent(classe.id)}`, {
+            n_bethel: choix.n_bethel, ...(classe.adresse ? {} : { adresse: origine || null }),
+          });
+        } catch (e) { /* facultatif */ }
+      }
       setFait(p); setEtape(4); chargerSuivis(); if (onChanged) onChanged();
     } catch (e) { setErreur(e.message); } finally { setOccupe(false); }
   }
@@ -7279,7 +7324,7 @@ function PlacementView({ bethels, onChanged }) {
     try { await supaPatch("placements", `id=eq.${p.id}`, { [champ]: v }); } catch (e) { chargerSuivis(); }
   }
 
-  function recommencer() { setF(VIDE); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
+  function recommencer() { setF(VIDE); setClasse(null); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
 
   const prenomLeader = choix ? String(choix.leader || "").split(" ")[0] : "";
   const mLeader = choix ? `Bénédictions ${prenomLeader} 🙏\n\nNous avons la joie de vous confier ${f.prenom} ${f.nom}, qui habite tout près de votre Bethel.\n📞 ${f.telephone || "numéro à venir"}\n\nMerci de l'appeler dans les 48 heures, de lui donner l'adresse du Bethel et de l'accueillir avec l'amour de Christ.\n\nAvec amour,\nToute l'équipe du Ministère Bethel 💙` : "";
@@ -7312,7 +7357,10 @@ function PlacementView({ bethels, onChanged }) {
         {guide(1, "qui accueillons-nous ?", "Écrivez les coordonnées de la personne. L'adresse complète donne le Bethel le plus juste.")}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
           {champ("prenom", "Prénom *")}{champ("nom", "Nom *")}
-          {champ("telephone", "Téléphone", "514-000-0000")}{champ("courriel", "Courriel (pour lui envoyer son Bethel)", "nom@exemple.com")}
+          {classe && <div style={{ flex: "1 1 100%", background: "rgba(31,92,78,0.12)", padding: "8px 12px", borderRadius: "8px", fontSize: "13px" }}>
+            ✓ Trouvé(e) dans la Classe de membre : <b>{classe.id}</b> – {classe.prenom} {classe.nom}. Courriel et téléphone remplis automatiquement.
+          </div>}
+          {champ("telephone", "Téléphone", "514-000-0000")}{champ("courriel", "Courriel (rempli tout seul s'il est dans la Classe de membre)", "nom@exemple.com")}
           {champ("adresse", "Adresse (rue, ville)", "3267 rue Fleury Est, Montréal")}{champ("code_postal", "Code postal", "H1H 2R4")}
           <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", color: "var(--ink-muted)", flex: "1 1 200px" }}>
             Placé par *
