@@ -7449,12 +7449,134 @@ function PlacementView({ bethels, onChanged }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Vue : Saison 25 — les Bethels par quartier et leurs membres        */
+/* Copie en lecture du fichier Google Sheets Saison_25 (table         */
+/* saison25_blocs, mise à jour toutes les 10 minutes par le fichier). */
+/* ------------------------------------------------------------------ */
+function Saison25View({ onNavigate }) {
+  const [blocs, setBlocs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [erreur, setErreur] = useState("");
+  const [onglet, setOnglet] = useState("");
+  const [q, setQ] = useState("");
+  const [voirRetires, setVoirRetires] = useState(false);
+  const [ouvert, setOuvert] = useState({});
+
+  async function charger() {
+    setLoading(true); setErreur("");
+    try { setBlocs(await supaGetTout("saison25_blocs", "actif=eq.true&select=*&order=ordre.asc")); }
+    catch (e) { setErreur(e.message); } finally { setLoading(false); }
+  }
+  useEffect(() => { charger(); }, []);
+
+  const actifs = blocs.filter((b) => voirRetires || !b.etat);
+  const onglets = useMemo(() => {
+    const m = {};
+    actifs.forEach((b) => { m[b.onglet] = m[b.onglet] || { bethels: 0, membres: 0 }; m[b.onglet].bethels++; m[b.onglet].membres += (b.membres || []).length; });
+    return Object.entries(m).sort((a, b) => a[0].localeCompare(b[0], "fr"));
+  }, [actifs]);
+  const totalMembres = actifs.reduce((s, b) => s + (b.membres || []).length, 0);
+  const maj = blocs.reduce((d, b) => (b.updated_at > d ? b.updated_at : d), "");
+
+  const t = normaliseNom(q);
+  const visibles = actifs.filter((b) => {
+    if (onglet && b.onglet !== onglet) return false;
+    if (!t) return true;
+    const texte = normaliseNom([b.leader, b.n_bethel, b.overseer, b.ministre, ...(b.membres || []).map((m) => `${m.prenom} ${m.nom}`)].join(" "));
+    return texte.includes(t);
+  });
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Saison 25</h1>
+          <p style={{ color: "var(--ink-muted)", fontSize: "13.5px", margin: 0 }}>
+            Les Bethels par quartier et les personnes placées. Copie du fichier Saison_25{maj ? ` · mise à jour ${new Date(maj).toLocaleString("fr-CA", { dateStyle: "medium", timeStyle: "short" })}` : ""}.
+          </p>
+        </div>
+        <button onClick={() => onNavigate && onNavigate("placement")} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 14px", border: 0, borderRadius: "8px", background: "var(--gold)", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+          <Plus size={16} /> Placer une personne
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", margin: "16px 0" }}>
+        <StatCard label="Bethels" value={actifs.length} />
+        <StatCard label="Personnes placées" value={totalMembres} accent="var(--teal)" />
+        <StatCard label="Places libres" value={Math.max(0, actifs.length * 12 - totalMembres)} accent="var(--gold)" />
+        <StatCard label="Quartiers" value={onglets.length} accent="var(--plum)" />
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
+        {[["", { bethels: actifs.length, membres: totalMembres }], ...onglets].map(([o, c]) => (
+          <button key={o || "tous"} onClick={() => setOnglet(onglet === o ? "" : o)} style={{ padding: "6px 11px", borderRadius: "999px", border: "1px solid var(--border)", background: onglet === o ? "var(--plum)" : "var(--surface)", color: onglet === o ? "#fff" : "var(--ink)", fontSize: "12.5px", cursor: "pointer", fontFamily: "var(--font-body)" }}>
+            {o || "Tous les quartiers"} · {c.bethels}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "center", marginBottom: "14px" }}>
+        <div style={{ position: "relative", flex: "1 1 260px", maxWidth: "420px" }}>
+          <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Leader, membre, N° Bethel, overseer…" style={{ ...cmInput, width: "100%", boxSizing: "border-box", paddingLeft: "32px" }} />
+        </div>
+        <label style={{ fontSize: "12.5px", color: "var(--ink-muted)", display: "flex", gap: "6px", alignItems: "center" }}>
+          <input type="checkbox" checked={voirRetires} onChange={() => setVoirRetires(!voirRetires)} /> Voir aussi les Bethels retirés
+        </label>
+        <button onClick={charger} title="Recharger" style={{ ...cmInput, cursor: "pointer" }}><RefreshCw size={15} /></button>
+      </div>
+
+      {loading && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Chargement…</div>}
+      {erreur && <div style={{ fontSize: "13px", color: "var(--brick)" }}>{erreur}</div>}
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: "12px" }}>
+        {visibles.map((b) => {
+          const membres = b.membres || [];
+          const n = membres.length;
+          const plein = n >= 12;
+          return (
+            <div key={b.n_bethel} style={{ border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)", padding: "14px", opacity: b.etat ? 0.6 : 1, minWidth: 0 }}>
+              <div style={{ fontSize: "11px", color: "var(--gold)", fontWeight: 700, letterSpacing: "0.04em", textTransform: "uppercase" }}>{b.onglet}{b.etat ? ` · ${b.etat}` : ""}</div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "17px", fontWeight: 700, marginTop: "2px" }}>{b.leader}</div>
+              <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{b.n_bethel}</div>
+              <div style={{ fontSize: "12.5px", marginTop: "8px", lineHeight: 1.5 }}>
+                <div>📍 {b.code_postal || "code postal à compléter"} · {b.jour} {b.heure}</div>
+                <div>📞 {b.telephone || "–"}</div>
+                <div style={{ color: "var(--ink-muted)" }}>Overseer : {b.overseer || "–"} · Ministre : {b.ministre || "–"}</div>
+              </div>
+              <div style={{ fontSize: "12.5px", marginTop: "8px", fontWeight: 600 }}>{n} personne(s) sur 12{plein ? " · complet" : ""}</div>
+              <div style={{ height: "6px", background: "var(--border)", borderRadius: "3px", marginTop: "4px", overflow: "hidden" }}>
+                <div style={{ height: "100%", width: `${Math.min(100, n / 12 * 100)}%`, background: plein ? "var(--brick)" : "var(--teal)" }} />
+              </div>
+              {n > 0 && (
+                <div style={{ marginTop: "8px" }}>
+                  <button onClick={() => setOuvert((o) => ({ ...o, [b.n_bethel]: !o[b.n_bethel] }))} style={{ border: 0, background: "transparent", color: "var(--plum)", fontSize: "12.5px", cursor: "pointer", padding: 0 }}>
+                    {ouvert[b.n_bethel] || t ? "▾" : "▸"} Voir les personnes
+                  </button>
+                  {(ouvert[b.n_bethel] || t) && (
+                    <ol style={{ margin: "6px 0 0", paddingLeft: "18px", fontSize: "12.5px", lineHeight: 1.6 }}>
+                      {membres.map((m, i) => <li key={i}>{m.prenom} {m.nom}{m.telephone ? <span style={{ color: "var(--ink-muted)" }}> · {m.telephone}</span> : null}</li>)}
+                    </ol>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {!loading && visibles.length === 0 && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Aucun Bethel trouvé.</div>}
+    </div>
+  );
+}
+
 const NAV = [
   { id: "dashboard", label: "Tableau de bord", icon: Home },
   { id: "submissions", label: "Soumissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
   { id: "manage-members", label: "Gérer les membres", icon: Plus },
   { id: "search", label: "Recherche membres", icon: Search },
+  { id: "saison25", label: "Saison 25", icon: Network },
   { id: "placement", label: "Placement", icon: MapPin },
   { id: "classe-membre", label: "Classe de membre", icon: GraduationCap },
   { id: "devotions", label: "Dévotions", icon: BookOpen },
@@ -8611,6 +8733,7 @@ function BethelAdminPortalInner() {
             {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} onReload={loadAll} />}
             {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
+            {view === "saison25" && <Saison25View onNavigate={setView} />}
             {view === "placement" && <PlacementView bethels={bethels} onChanged={loadAll} />}
             {view === "classe-membre" && <ClasseMembreView />}
             {view === "devotions" && <DevotionsView />}
