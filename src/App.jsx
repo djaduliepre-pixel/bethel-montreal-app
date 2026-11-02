@@ -7285,7 +7285,7 @@ function PlacementView({ bethels, onChanged }) {
     } catch (e) { /* facultatif */ }
   }
   useEffect(() => {
-    supaGetTout("supervision_sheet", "actif=eq.true&bethel_id=not.is.null&select=bethel_id,n_bethel,leader,l_tel,overseer,ministre")
+    supaGetTout("supervision_sheet", "actif=eq.true&bethel_id=not.is.null&select=bethel_id,n_bethel,leader,l_tel,overseer,ministre,l_adresse")
       .then((rows) => { const m = {}; rows.forEach((r) => { m[r.bethel_id] = r; }); setChaine(m); }).catch(() => {});
     chargerSuivis();
   }, []);
@@ -7304,11 +7304,17 @@ function PlacementView({ bethels, onChanged }) {
     try {
       setDoublons(await verifierDoublonsComplet(f.prenom, f.nom, f.telephone));
       const fsa = plFsa(origine);
-      let base = bethels.filter((b) => b.address && b.status !== "inactive" && chaine[b.bethel_id]);
-      const meme = base.filter((b) => fsa && plFsa(b.address).slice(0, 2) === fsa.slice(0, 2));
+      // Adresse du Bethel : celle du fichier de supervision (complète, avec code postal) en priorité.
+      const adresseDe = (b) => {
+        const l = (chaine[b.bethel_id] || {}).l_adresse || "";
+        return plFsa(l) || !b.address ? (l || b.address || "") : b.address;
+      };
+      let base = bethels.filter((b) => b.status !== "inactive" && chaine[b.bethel_id] && adresseDe(b));
+      // On garde la même région (2 premiers caractères du code postal) ; un Bethel sans code postal n'est jamais écarté.
+      const meme = base.filter((b) => { const z = plFsa(adresseDe(b)); return !fsa || !z || z.slice(0, 2) === fsa.slice(0, 2); });
       if (meme.length >= 3) base = meme;
       const res = await Promise.all(base.map(async (b) => {
-        try { return { b, minutes: await getDrivingMinutes(origine, b.address) }; } catch (e) { return { b, minutes: null }; }
+        try { return { b, minutes: await getDrivingMinutes(origine, adresseDe(b)) }; } catch (e) { return { b, minutes: null }; }
       }));
       const tri = res.filter((r) => r.minutes != null).sort((a, b) => a.minutes - b.minutes).slice(0, 3);
       if (!tri.length) throw new Error("Aucun Bethel trouvé près de cette adresse. Vérifiez l'adresse.");
@@ -7317,7 +7323,7 @@ function PlacementView({ bethels, onChanged }) {
         const membres = nbMembres ? nbMembres[b.bethel_id] || 0 : null;
         return { bethel: b, minutes, n_bethel: c.n_bethel || b.hp_number, leader: c.leader || b.leader_name, tel: c.l_tel || "",
           overseer: c.overseer, ministre: c.ministre, membres, complet: membres != null && membres >= 12,
-          trajet: `https://www.google.com/maps/dir/${encodeURIComponent(origine)}/${encodeURIComponent(b.address)}` };
+          trajet: `https://www.google.com/maps/dir/${encodeURIComponent(origine)}/${encodeURIComponent(adresseDe(b))}` };
       }));
       setEtape(2);
     } catch (e) { setErreur(e.message); } finally { setOccupe(false); }
