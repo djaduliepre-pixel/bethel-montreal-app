@@ -7203,6 +7203,29 @@ async function plChercherClasse(prenom, nom, tel) {
   return rows.length === 1 ? rows[0] : null;
 }
 
+// Placement : la personne a-t-elle déjà été placée (app) ou rattachée à un Bethel ?
+// Cherche par nom (dans les deux sens) et par téléphone (10 derniers chiffres).
+async function plDejaPlace(prenom, nom, tel) {
+  const p = (prenom || "").trim(), n = (nom || "").trim(), chiffres = String(tel || "").replace(/\D/g, "");
+  const enc = (x) => encodeURIComponent(x.replace(/[(),*]/g, " ").trim());
+  const msgs = [];
+  const date = (d) => new Date(d).toLocaleDateString("fr-CA", { day: "numeric", month: "long", year: "numeric" });
+  let pl = [];
+  if (p.length >= 2 && n.length >= 2) {
+    pl = await supaGet("placements", `or=(and(prenom.ilike.${enc(p)},nom.ilike.${enc(n)}),and(prenom.ilike.${enc(n)},nom.ilike.${enc(p)}))&order=created_at.desc&limit=5`);
+  }
+  if (!pl.length && chiffres.length >= 10) {
+    pl = (await supaGet("placements", `telephone=ilike.*${chiffres.slice(-4)}*&order=created_at.desc&limit=50`))
+      .filter((r) => String(r.telephone || "").replace(/\D/g, "").endsWith(chiffres.slice(-10)));
+  }
+  pl.forEach((r) => msgs.push(`${r.prenom} ${r.nom} a déjà été placé(e) le ${date(r.created_at)} par ${r.place_par || "l'équipe"} dans le Bethel de ${r.leader} (${r.n_bethel}).`));
+  if (!msgs.length && p.length >= 2 && n.length >= 2) {
+    const m = await supaGet("members", `or=(and(first_name.ilike.${enc(p)},last_name.ilike.${enc(n)}),and(first_name.ilike.${enc(n)},last_name.ilike.${enc(p)}))&status=eq.active&select=first_name,last_name,role&limit=3`);
+    m.forEach((r) => msgs.push(`${r.first_name} ${r.last_name} est déjà membre actif d'un Bethel (${r.role}).`));
+  }
+  return msgs;
+}
+
 function plSuivi(p) {
   const jours = (Date.now() - new Date(p.created_at).getTime()) / 86400000;
   if (p.present) return { t: "✓ Intégré(e) dans son Bethel", c: "var(--teal)" };
@@ -7225,6 +7248,8 @@ function PlacementView({ bethels, onChanged }) {
   const [chaine, setChaine] = useState({});
   const [suivis, setSuivis] = useState([]);
   const [classe, setClasse] = useState(null); // fiche trouvée dans la Classe de membre
+  const [deja, setDeja] = useState([]); // déjà placé(e) ? (vérifié dès qu'on écrit le nom ou le téléphone)
+  const [pasMeme, setPasMeme] = useState(false);
   const nbMembres = useNombreMembresParBethel();
 
   // Dès que le nom ou le téléphone est écrit : on cherche la personne dans la
@@ -7233,9 +7258,15 @@ function PlacementView({ bethels, onChanged }) {
     let annule = false;
     const t = setTimeout(async () => {
       try {
-        const r = await plChercherClasse(f.prenom, f.nom, f.telephone);
+        const [r, d] = await Promise.all([
+          plChercherClasse(f.prenom, f.nom, f.telephone),
+          plDejaPlace(f.prenom, f.nom, f.telephone).catch(() => []),
+        ]);
         if (annule) return;
         setClasse(r);
+        const msgs = [...d];
+        if (r && r.n_bethel && !d.length) msgs.push(`Selon la Classe de membre, ${r.prenom} ${r.nom} est déjà rattaché(e) au ${r.n_bethel}.`);
+        setDeja(msgs); setPasMeme(false);
         if (r) setF((x) => ({
           ...x,
           courriel: x.courriel || r.courriel || "",
@@ -7267,6 +7298,7 @@ function PlacementView({ bethels, onChanged }) {
     if (!f.prenom.trim() || !f.nom.trim()) return setErreur("Écrivez le prénom et le nom.");
     if (!origine) return setErreur("Écrivez l'adresse ou le code postal.");
     if (!placePar) return setErreur("Choisissez votre nom dans « Placé par ».");
+    if (deja.length && !pasMeme) return setErreur("Cette personne semble déjà placée. Vérifiez, ou cochez « Ce n'est pas la même personne ».");
     try { localStorage.setItem("placePar", placePar); } catch (e) {}
     setOccupe(true);
     try {
@@ -7324,7 +7356,7 @@ function PlacementView({ bethels, onChanged }) {
     try { await supaPatch("placements", `id=eq.${p.id}`, { [champ]: v }); } catch (e) { chargerSuivis(); }
   }
 
-  function recommencer() { setF(VIDE); setClasse(null); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
+  function recommencer() { setF(VIDE); setClasse(null); setDeja([]); setPasMeme(false); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
 
   const prenomLeader = choix ? String(choix.leader || "").split(" ")[0] : "";
   const mLeader = choix ? `Bénédictions ${prenomLeader} 🙏\n\nNous avons la joie de vous confier ${f.prenom} ${f.nom}, qui habite tout près de votre Bethel.\n📞 ${f.telephone || "numéro à venir"}\n\nMerci de l'appeler dans les 48 heures, de lui donner l'adresse du Bethel et de l'accueillir avec l'amour de Christ.\n\nAvec amour,\nToute l'équipe du Ministère Bethel 💙` : "";
@@ -7359,6 +7391,13 @@ function PlacementView({ bethels, onChanged }) {
           {champ("prenom", "Prénom *")}{champ("nom", "Nom *")}
           {classe && <div style={{ flex: "1 1 100%", background: "rgba(31,92,78,0.12)", padding: "8px 12px", borderRadius: "8px", fontSize: "13px" }}>
             ✓ Trouvé(e) dans la Classe de membre : <b>{classe.id}</b> – {classe.prenom} {classe.nom}. Courriel et téléphone remplis automatiquement.
+          </div>}
+          {deja.length > 0 && <div style={{ flex: "1 1 100%", background: "rgba(160,60,50,0.12)", borderLeft: "4px solid var(--brick)", padding: "10px 12px", borderRadius: "8px", fontSize: "13.5px", lineHeight: 1.5 }}>
+            ⚠️ <b>Attention, cette personne est peut-être déjà intégrée.</b><br />{deja.map((m, i) => <div key={i}>• {m}</div>)}
+            <div style={{ marginTop: "4px" }}>Merci de vérifier avec la personne qui l'a placée avant de continuer.</div>
+            <label style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", fontSize: "13px" }}>
+              <input type="checkbox" checked={pasMeme} onChange={(e) => setPasMeme(e.target.checked)} /> Ce n'est pas la même personne (homonyme)
+            </label>
           </div>}
           {champ("telephone", "Téléphone", "514-000-0000")}{champ("courriel", "Courriel (rempli tout seul s'il est dans la Classe de membre)", "nom@exemple.com")}
           {champ("adresse", "Adresse (rue, ville)", "3267 rue Fleury Est, Montréal")}{champ("code_postal", "Code postal", "H1H 2R4")}
