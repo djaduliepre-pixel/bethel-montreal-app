@@ -3,7 +3,7 @@ import { SignedIn, SignedOut, SignIn, UserButton } from "@clerk/clerk-react";
 import {
   Home, Inbox, Users, BarChart3, MapPin, Search, Check, X,
   ChevronRight, Phone, AlertCircle, Sparkles, Plus, RefreshCw,
-  Edit2, ArrowRightLeft, Trash2, BookOpen, Network,
+  Edit2, ArrowRightLeft, Trash2, BookOpen, Network, GraduationCap,
 } from "lucide-react";
 
 /* ------------------------------------------------------------------ */
@@ -6822,12 +6822,339 @@ function AttendanceView() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Vue : Classe de membre (registre permanent des apprenants)         */
+/* Table classe_membre (séparée : bethels, members, etc. ne sont pas  */
+/* touchés). La chaîne de supervision vient de supervision_sheet      */
+/* (lecture seule) par le N° Bethel.                                  */
+/* ------------------------------------------------------------------ */
+const CM_ETAPES = [
+  { id: "1. Fondements de la Foi", action: "Envoyer le lien de la classe en ligne (glorytgtraining.com) et suivre chaque session" },
+  { id: "2. Les 7 Piliers", action: "Envoyer le lien du groupe Les 7 Piliers" },
+  { id: "3. Serviteur-Leader", action: "Envoyer le lien du groupe Serviteur-Leader" },
+  { id: "4. Baptême", action: "Inviter à la classe de baptême et à la prochaine séance" },
+  { id: "5. Bethel, formulaire et ministère", action: "Compléter ce qui manque : Bethel, formulaire de membership, ministère" },
+  { id: "6. Prêt(e) à graduer", action: "Inviter à la prochaine graduation" },
+  { id: "Gradué(e)", action: "Encourager à continuer de servir dans son ministère" },
+];
+const CM_LISTES = {
+  campus: ["Montréal", "Longueuil", "eCampus"],
+  sexe: ["Femme", "Homme"],
+  age_13: ["Oui", "Non", "À vérifier"],
+  bapteme: ["Baptisé(e)", "Inscrit(e) au prochain baptême", "Prêt(e) pour le baptême", "À baptiser", "Pas prêt(e)", "À vérifier"],
+  graduation: ["Pas encore", "Gradué(e)", "Gradué(e) 2023-2024", "Gradué(e) déc. 2024", "Gradué(e) juil. 2025", "Gradué(e) 2025 (Longueuil)"],
+  verifie_par: ["Yves May Dérilus", "Sterline Fatal", "Nelly Adam"],
+  statut: ["Actif", "Gradué(e)", "Sert dans un ministère", "Déménagé(e)", "Transféré(e) dans un autre campus", "Inactif", "Décédé(e)"],
+};
+const cmNb = (arr) => (arr || []).filter(Boolean).length;
+const cmBaptiseOk = (b) => b === "Baptisé(e)" || b === "Inscrit(e) au prochain baptême";
+
+function cmCalcul(p) {
+  const fof = cmNb(p.fof), p7 = cmNb(p.p7), sl = cmNb(p.sl);
+  const gradue = String(p.graduation || "").startsWith("Gradué");
+  let etape;
+  if (gradue) etape = "Gradué(e)";
+  else if (fof < 5) etape = "1. Fondements de la Foi";
+  else if (p7 < 5) etape = "2. Les 7 Piliers";
+  else if (sl < 6) etape = "3. Serviteur-Leader";
+  else if (!cmBaptiseOk(p.bapteme)) etape = "4. Baptême";
+  else if (!p.n_bethel || !p.formulaire || !p.ministere) etape = "5. Bethel, formulaire et ministère";
+  else etape = "6. Prêt(e) à graduer";
+  const manque = [];
+  if (!gradue) {
+    if (!p.n_bethel) manque.push("Bethel");
+    if (!cmBaptiseOk(p.bapteme)) manque.push("Baptême");
+    if (fof < 5) manque.push("FOF");
+    if (p7 < 5) manque.push("7 Piliers");
+    if (sl < 6) manque.push("Serviteur-Leader");
+    if (!p.formulaire) manque.push("Formulaire membership");
+    if (!p.ministere) manque.push("Ministère");
+  }
+  return { fof, p7, sl, etape, manque, action: (CM_ETAPES.find((e) => e.id === etape) || {}).action };
+}
+
+const CM_VIDE = {
+  id: null, prenom: "", nom: "", telephone: "", courriel: "", sexe: "", campus: "Montréal", n_bethel: "",
+  date_demande: "", fof: [false, false, false, false, false], p7: [false, false, false, false, false],
+  sl: [false, false, false, false, false, false], classe_bapteme: false, age_13: "", bapteme: "", date_bapteme: "",
+  graduation: "Pas encore", formulaire: false, ministere: "", lien_par: "", date_lien: "", dernier_suivi: "",
+  verifie_par: "", commentaires: "", annee_entree: String(new Date().getFullYear()), statut: "Actif",
+};
+const CM_CHAMPS = Object.keys(CM_VIDE).filter((k) => k !== "id");
+
+function CmChamp({ label, children, large }) {
+  return (
+    <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", color: "var(--ink-muted)", flex: large ? "1 1 100%" : "1 1 180px", minWidth: 0 }}>
+      {label}
+      {children}
+    </label>
+  );
+}
+const cmInput = { padding: "8px 10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "14px", fontFamily: "var(--font-body)", background: "var(--surface)", color: "var(--ink)", minWidth: 0 };
+
+function CmFiche({ initial, chaineParBethel, nBethels, onClose, onSaved }) {
+  const [f, setF] = useState(() => ({ ...CM_VIDE, ...initial }));
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState("");
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const setCase = (k, i) => setF((x) => { const a = [...(x[k] || [])]; a[i] = !a[i]; return { ...x, [k]: a }; });
+  const c = cmCalcul(f);
+  const chaine = chaineParBethel[(f.n_bethel || "").trim()];
+
+  async function enregistrer() {
+    if (!f.prenom.trim() || !f.nom.trim()) { setErr("Écrire au moins le prénom et le nom."); return; }
+    setSaving(true); setErr("");
+    try {
+      const body = {};
+      CM_CHAMPS.forEach((k) => { const v = f[k]; body[k] = typeof v === "string" ? (v.trim() || null) : v; });
+      let r;
+      if (f.id) r = await supaPatch("classe_membre", `id=eq.${encodeURIComponent(f.id)}`, body);
+      else r = await supaPost("classe_membre", { ...body, sources: "Ajouté dans l'app" });
+      onSaved(r[0]);
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  }
+
+  const sel = (k) => (
+    <select value={f[k] || ""} onChange={(e) => set(k, e.target.value)} style={cmInput}>
+      <option value=""></option>
+      {[...CM_LISTES[k], ...(f[k] && !CM_LISTES[k].includes(f[k]) ? [f[k]] : [])].map((o) => <option key={o}>{o}</option>)}
+    </select>
+  );
+  const txt = (k, ph) => <input value={f[k] || ""} placeholder={ph || ""} onChange={(e) => set(k, e.target.value)} style={cmInput} />;
+  const cases = (k, n, p) => (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px" }}>
+      {Array.from({ length: n }).map((_, i) => (
+        <label key={i} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "13.5px", color: "var(--ink)" }}>
+          <input type="checkbox" checked={!!(f[k] || [])[i]} onChange={() => setCase(k, i)} /> {p} {i + 1}
+        </label>
+      ))}
+    </div>
+  );
+  const section = (t) => <div style={{ flex: "1 1 100%", fontSize: "11.5px", fontWeight: 700, letterSpacing: "0.05em", textTransform: "uppercase", color: "var(--plum)", marginTop: "10px" }}>{t}</div>;
+
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.35)", zIndex: 50, display: "flex", justifyContent: "flex-end" }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{ width: "min(560px, 100%)", height: "100%", overflowY: "auto", background: "var(--bg)", padding: "20px", boxSizing: "border-box" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "10px" }}>
+          <div>
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>{f.id || "Nouvel apprenant"}</div>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "22px", margin: "2px 0 0" }}>{(f.prenom + " " + f.nom).trim() || "Nouvel apprenant"}</h2>
+          </div>
+          <button onClick={onClose} style={{ border: 0, background: "transparent", cursor: "pointer" }}><X size={20} /></button>
+        </div>
+
+        <div style={{ marginTop: "12px", padding: "10px 12px", borderRadius: "8px", background: "var(--surface)", border: "1px solid var(--border)", fontSize: "13px", lineHeight: 1.5 }}>
+          <div><b>Étape :</b> {c.etape}</div>
+          <div><b>Prochaine action :</b> {c.action}</div>
+          <div><b>Ce qui manque pour graduer :</b> {c.manque.length ? c.manque.join(", ") : (c.etape === "Gradué(e)" ? "Déjà gradué(e)" : "Rien : prêt(e) à graduer")}</div>
+        </div>
+
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginTop: "8px" }}>
+          {section("Identité")}
+          <CmChamp label="Prénom *">{txt("prenom")}</CmChamp>
+          <CmChamp label="Nom *">{txt("nom")}</CmChamp>
+          <CmChamp label="Téléphone">{txt("telephone")}</CmChamp>
+          <CmChamp label="Courriel">{txt("courriel")}</CmChamp>
+          <CmChamp label="Sexe">{sel("sexe")}</CmChamp>
+          <CmChamp label="Campus">{sel("campus")}</CmChamp>
+
+          {section("Bethel et chaîne de supervision")}
+          <CmChamp label="N° Bethel" large>
+            <input list="cm-bethels" value={f.n_bethel || ""} placeholder="Bethel-Montréal-000059" onChange={(e) => set("n_bethel", e.target.value)} style={cmInput} />
+            <datalist id="cm-bethels">{nBethels.map((b) => <option key={b} value={b} />)}</datalist>
+          </CmChamp>
+          <div style={{ flex: "1 1 100%", fontSize: "13px", color: "var(--ink)" }}>
+            {chaine ? <>Bethel Leader : <b>{chaine.leader || "–"}</b> · Overseer : <b>{chaine.overseer || "–"}</b> · Ministre : <b>{chaine.ministre || "–"}</b></>
+              : <span style={{ color: "var(--ink-muted)" }}>{f.n_bethel ? "N° Bethel introuvable dans la liste des Bethels." : "Aucun Bethel pour le moment."}</span>}
+          </div>
+
+          {section("Classes terminées")}
+          <CmChamp label={`Fondements de la Foi (${c.fof}/5)`} large>{cases("fof", 5, "FOF")}</CmChamp>
+          <CmChamp label={`Les 7 Piliers (${c.p7}/5)`} large>{cases("p7", 5, "7P")}</CmChamp>
+          <CmChamp label={`Serviteur-Leader (${c.sl}/6)`} large>{cases("sl", 6, "SL")}</CmChamp>
+
+          {section("Baptême")}
+          <label style={{ flex: "1 1 100%", display: "flex", gap: "6px", alignItems: "center", fontSize: "13.5px" }}>
+            <input type="checkbox" checked={!!f.classe_bapteme} onChange={() => set("classe_bapteme", !f.classe_bapteme)} /> Classe de baptême faite
+          </label>
+          <CmChamp label="13 ans et +">{sel("age_13")}</CmChamp>
+          <CmChamp label="Baptême">{sel("bapteme")}</CmChamp>
+          <CmChamp label="Date de baptême">{txt("date_bapteme")}</CmChamp>
+
+          {section("Graduation")}
+          <label style={{ flex: "1 1 100%", display: "flex", gap: "6px", alignItems: "center", fontSize: "13.5px" }}>
+            <input type="checkbox" checked={!!f.formulaire} onChange={() => set("formulaire", !f.formulaire)} /> Formulaire membership rempli
+          </label>
+          <CmChamp label="Ministère où il/elle sert">{txt("ministere")}</CmChamp>
+          <CmChamp label="Graduation">{sel("graduation")}</CmChamp>
+
+          {section("Suivi")}
+          <CmChamp label="Lien envoyé par">{txt("lien_par")}</CmChamp>
+          <CmChamp label="Date du lien">{txt("date_lien")}</CmChamp>
+          <CmChamp label="Dernier suivi">{txt("dernier_suivi")}</CmChamp>
+          <CmChamp label="Vérifié dans Elexio par">{sel("verifie_par")}</CmChamp>
+          <CmChamp label="Date de la demande">{txt("date_demande")}</CmChamp>
+          <CmChamp label="Commentaires" large>
+            <textarea value={f.commentaires || ""} onChange={(e) => set("commentaires", e.target.value)} rows={3} style={{ ...cmInput, resize: "vertical" }} />
+          </CmChamp>
+
+          {section("Dossier")}
+          <CmChamp label="Année d'entrée">{txt("annee_entree")}</CmChamp>
+          <CmChamp label="Statut du dossier">{sel("statut")}</CmChamp>
+        </div>
+
+        {err && <div style={{ marginTop: "12px", color: "var(--brick)", fontSize: "13px" }}>{err}</div>}
+        <button onClick={enregistrer} disabled={saving} style={{ marginTop: "16px", width: "100%", padding: "11px", border: 0, borderRadius: "8px", background: "var(--plum)", color: "#fff", fontWeight: 700, fontSize: "14px", cursor: "pointer" }}>
+          {saving ? "Enregistrement…" : "Enregistrer"}
+        </button>
+        <div style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "8px" }}>On ne supprime jamais une personne : on change son statut du dossier.</div>
+      </div>
+    </div>
+  );
+}
+
+function ClasseMembreView() {
+  const [liste, setListe] = useState([]);
+  const [chaineParBethel, setChaine] = useState({});
+  const [loading, setLoading] = useState(true);
+  const [erreur, setErreur] = useState("");
+  const [q, setQ] = useState("");
+  const [etape, setEtape] = useState("");
+  const [campus, setCampus] = useState("");
+  const [statut, setStatut] = useState("");
+  const [fiche, setFiche] = useState(null);
+
+  async function charger() {
+    setLoading(true); setErreur("");
+    try {
+      const [rows, sup] = await Promise.all([
+        supaGetTout("classe_membre", "select=*&order=id.asc"),
+        supaGetTout("supervision_sheet", "actif=eq.true&select=n_bethel,leader,overseer,ministre").catch(() => []),
+      ]);
+      setListe(rows);
+      const m = {};
+      sup.forEach((s) => { if (s.n_bethel) m[s.n_bethel.trim()] = s; });
+      setChaine(m);
+    } catch (e) { setErreur(e.message); } finally { setLoading(false); }
+  }
+  useEffect(() => { charger(); }, []);
+
+  const enrichis = useMemo(() => liste.map((p) => ({ ...p, _c: cmCalcul(p), _ch: chaineParBethel[(p.n_bethel || "").trim()] })), [liste, chaineParBethel]);
+  const nBethels = useMemo(() => Object.keys(chaineParBethel).sort(), [chaineParBethel]);
+  const compte = useMemo(() => { const c = {}; enrichis.forEach((p) => { c[p._c.etape] = (c[p._c.etape] || 0) + 1; }); return c; }, [enrichis]);
+
+  const visibles = useMemo(() => {
+    const t = normaliseNom(q);
+    return enrichis.filter((p) => {
+      if (etape && p._c.etape !== etape) return false;
+      if (campus && p.campus !== campus) return false;
+      if (statut && (p.statut || "") !== statut) return false;
+      if (t) {
+        const h = normaliseNom(`${p.prenom} ${p.nom} ${p.nom} ${p.prenom} ${p.id}`) + " " + String(p.telephone || "").replace(/\D/g, "") + " " + String(p.courriel || "").toLowerCase() + " " + String(p.id).toLowerCase();
+        const td = q.replace(/\D/g, "");
+        if (!h.includes(t) && !(td.length >= 3 && h.includes(td)) && !h.includes(q.toLowerCase().trim())) return false;
+      }
+      return true;
+    });
+  }, [enrichis, q, etape, campus, statut]);
+
+  function surEnregistre(r) {
+    setListe((l) => { const i = l.findIndex((x) => x.id === r.id); if (i === -1) return [...l, r]; const c = [...l]; c[i] = r; return c; });
+    setFiche(null);
+  }
+
+  const pill = (txt, actif, onClick, n) => (
+    <button key={txt} onClick={onClick} style={{ padding: "6px 11px", borderRadius: "999px", border: "1px solid var(--border)", background: actif ? "var(--plum)" : "var(--surface)", color: actif ? "#fff" : "var(--ink)", fontSize: "12.5px", cursor: "pointer", fontFamily: "var(--font-body)" }}>
+      {txt}{n !== undefined ? ` · ${n}` : ""}
+    </button>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "12px", flexWrap: "wrap" }}>
+        <div>
+          <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Classe de membre</h1>
+          <p style={{ color: "var(--ink-muted)", fontSize: "14px", margin: 0, maxWidth: "640px" }}>
+            Le parcours du disciple : Fondements de la Foi → Les 7 Piliers → Serviteur-Leader → Baptême → Graduation → Servir.
+            Classe en ligne : glorytgtraining.com
+          </p>
+        </div>
+        <button onClick={() => setFiche({})} style={{ display: "flex", alignItems: "center", gap: "6px", padding: "10px 14px", border: 0, borderRadius: "8px", background: "var(--plum)", color: "#fff", fontWeight: 700, cursor: "pointer" }}>
+          <Plus size={16} /> Nouvel apprenant
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", margin: "18px 0" }}>
+        <StatCard label="Personnes suivies" value={enrichis.length} />
+        <StatCard label="En parcours" value={enrichis.filter((p) => p._c.etape !== "Gradué(e)").length} accent="var(--gold)" />
+        <StatCard label="Prêt(e)s à graduer" value={compte["6. Prêt(e) à graduer"] || 0} accent="var(--teal)" />
+        <StatCard label="Gradué(e)s" value={compte["Gradué(e)"] || 0} accent="var(--plum)" />
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px" }}>
+        {pill("Toutes les étapes", !etape, () => setEtape(""), enrichis.length)}
+        {CM_ETAPES.map((e) => pill(e.id, etape === e.id, () => setEtape(etape === e.id ? "" : e.id), compte[e.id] || 0))}
+      </div>
+
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "16px" }}>
+        <div style={{ position: "relative", flex: "1 1 260px", maxWidth: "420px" }}>
+          <Search size={15} color="var(--ink-muted)" style={{ position: "absolute", left: "10px", top: "10px" }} />
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nom, téléphone, courriel ou MBR-…" style={{ ...cmInput, width: "100%", boxSizing: "border-box", paddingLeft: "32px" }} />
+        </div>
+        <select value={campus} onChange={(e) => setCampus(e.target.value)} style={cmInput}>
+          <option value="">Tous les campus</option>{CM_LISTES.campus.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <select value={statut} onChange={(e) => setStatut(e.target.value)} style={cmInput}>
+          <option value="">Tous les statuts</option>{CM_LISTES.statut.map((c) => <option key={c}>{c}</option>)}
+        </select>
+        <button onClick={charger} title="Recharger" style={{ ...cmInput, cursor: "pointer" }}><RefreshCw size={15} /></button>
+      </div>
+
+      {loading && <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Chargement…</div>}
+      {erreur && <div style={{ fontSize: "13px", color: "var(--brick)" }}>{erreur}</div>}
+
+      {!loading && (
+        <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "var(--ink-muted)", fontSize: "11.5px", textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                {["Personne", "FOF", "7P", "SL", "Étape", "Bethel / Overseer", "Ce qui manque"].map((h) => <th key={h} style={{ padding: "10px 12px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {visibles.slice(0, 400).map((p) => (
+                <tr key={p.id} onClick={() => setFiche(p)} style={{ cursor: "pointer", borderBottom: "1px solid var(--border)" }}>
+                  <td style={{ padding: "9px 12px" }}>
+                    <div style={{ fontWeight: 600 }}>{p.prenom} {p.nom}</div>
+                    <div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{p.id} · {p.campus || "–"}{p.telephone ? ` · ${p.telephone}` : ""}</div>
+                  </td>
+                  <td style={{ padding: "9px 12px" }}>{p._c.fof}/5</td>
+                  <td style={{ padding: "9px 12px" }}>{p._c.p7}/5</td>
+                  <td style={{ padding: "9px 12px" }}>{p._c.sl}/6</td>
+                  <td style={{ padding: "9px 12px", whiteSpace: "nowrap", color: p._c.etape === "6. Prêt(e) à graduer" ? "var(--teal)" : p._c.etape === "Gradué(e)" ? "var(--plum)" : "var(--ink)", fontWeight: 600 }}>{p._c.etape}</td>
+                  <td style={{ padding: "9px 12px", fontSize: "12px" }}>{p.n_bethel || <span style={{ color: "var(--ink-muted)" }}>–</span>}{p._ch && <div style={{ color: "var(--ink-muted)" }}>{p._ch.overseer}</div>}</td>
+                  <td style={{ padding: "9px 12px", fontSize: "12px", color: "var(--ink-muted)" }}>{p._c.etape === "Gradué(e)" ? "" : (p._c.manque.join(", ") || "Rien : prêt(e)")}</td>
+                </tr>
+              ))}
+              {visibles.length === 0 && <tr><td colSpan={7} style={{ padding: "14px", color: "var(--ink-muted)" }}>Aucune personne trouvée.</td></tr>}
+            </tbody>
+          </table>
+          {visibles.length > 400 && <div style={{ padding: "10px 12px", fontSize: "12px", color: "var(--ink-muted)" }}>400 premières personnes affichées : affinez la recherche.</div>}
+        </div>
+      )}
+
+      {fiche && <CmFiche initial={fiche} chaineParBethel={chaineParBethel} nBethels={nBethels} onClose={() => setFiche(null)} onSaved={surEnregistre} />}
+    </div>
+  );
+}
+
 const NAV = [
   { id: "dashboard", label: "Tableau de bord", icon: Home },
   { id: "submissions", label: "Soumissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
   { id: "manage-members", label: "Gérer les membres", icon: Plus },
   { id: "search", label: "Recherche membres", icon: Search },
+  { id: "classe-membre", label: "Classe de membre", icon: GraduationCap },
   { id: "devotions", label: "Dévotions", icon: BookOpen },
   { id: "attendance", label: "Présences", icon: Check },
   { id: "reports", label: "Rapports", icon: BarChart3 },
@@ -7982,6 +8309,7 @@ function BethelAdminPortalInner() {
             {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} onReload={loadAll} />}
             {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
+            {view === "classe-membre" && <ClasseMembreView />}
             {view === "devotions" && <DevotionsView />}
             {view === "attendance" && <AttendanceView />}
             {view === "reports" && <ReportsView submissions={submissions} bethels={bethels} zones={zones} onChanged={loadAll} />}
