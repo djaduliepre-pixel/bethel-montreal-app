@@ -7170,12 +7170,244 @@ function ClasseMembreView() {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Vue : Placement d'un membre (parcours en 4 étapes, Saison 25)      */
+/* Ajoute la personne aux membres du Bethel choisi (comme « Gérer les */
+/* membres ») et note le placement dans la table placements. Le       */
+/* fichier Saison_25 importe ensuite chaque placement dans le bloc du */
+/* Bethel et envoie les courriels de bienvenue.                       */
+/* ------------------------------------------------------------------ */
+const EQUIPE_INTEGRATION = [
+  "Pierre-Richard Charleston", "Nelly Adam", "Wideline Decius", "Ritza Charles", "Jean Ludgert Duliepre",
+  "Christella Saint-Hilaire", "Andrise Derosier", "Néhémie Jean", "Gertrude Damisca", "Cherline Isidor",
+  "Cherline Devieux Occean", "Jerry Monece", "Melissa Pierre Antoine", "Daphnée Edouard",
+  "Marie Michelle Félicien", "Pedro Darcelin",
+];
+const plFsa = (t) => { const m = String(t || "").toUpperCase().match(/\b([A-Z]\d[A-Z])\s?\d[A-Z]\d\b/); return m ? m[1] : ""; };
+const plWa = (tel, txt) => { let n = String(tel || "").replace(/\D/g, ""); if (n.length === 10) n = "1" + n; return `https://wa.me/${n}?text=${encodeURIComponent(txt)}`; };
+const plQuand = (jour, heure) => `${String(jour || "dimanche").toLowerCase()}${heure ? " à " + String(heure).replace("h", " h ").trim() : ""}`;
+
+function plSuivi(p) {
+  const jours = (Date.now() - new Date(p.created_at).getTime()) / 86400000;
+  if (p.present) return { t: "✓ Intégré(e) dans son Bethel", c: "var(--teal)" };
+  if (!p.message_envoye) return { t: "⏰ Envoyer les messages", c: "var(--brick)" };
+  if (!p.leader_a_appele) return jours > 2 ? { t: "⏰ Appel du leader à vérifier (+48 h)", c: "var(--brick)" } : { t: "En attente de l'appel du leader", c: "var(--ink-muted)" };
+  return jours > 7 ? { t: "⏰ Relancer : pas encore venu(e)", c: "var(--brick)" } : { t: "En attente du 1er Bethel", c: "var(--ink-muted)" };
+}
+
+function PlacementView({ bethels, onChanged }) {
+  const VIDE = { prenom: "", nom: "", telephone: "", courriel: "", adresse: "", code_postal: "" };
+  const [etape, setEtape] = useState(1);
+  const [f, setF] = useState(VIDE);
+  const [placePar, setPlacePar] = useState(() => { try { return localStorage.getItem("placePar") || ""; } catch (e) { return ""; } });
+  const [doublons, setDoublons] = useState([]);
+  const [proches, setProches] = useState([]);
+  const [choix, setChoix] = useState(null);
+  const [occupe, setOccupe] = useState(false);
+  const [erreur, setErreur] = useState("");
+  const [fait, setFait] = useState(null);
+  const [chaine, setChaine] = useState({});
+  const [suivis, setSuivis] = useState([]);
+  const nbMembres = useNombreMembresParBethel();
+
+  async function chargerSuivis() {
+    try {
+      const depuis = new Date(Date.now() - 60 * 86400000).toISOString();
+      setSuivis(await supaGet("placements", `created_at=gte.${encodeURIComponent(depuis)}&order=created_at.desc&limit=200`));
+    } catch (e) { /* facultatif */ }
+  }
+  useEffect(() => {
+    supaGetTout("supervision_sheet", "actif=eq.true&bethel_id=not.is.null&select=bethel_id,n_bethel,leader,l_tel,overseer,ministre")
+      .then((rows) => { const m = {}; rows.forEach((r) => { m[r.bethel_id] = r; }); setChaine(m); }).catch(() => {});
+    chargerSuivis();
+  }, []);
+
+  const set = (k, v) => setF((x) => ({ ...x, [k]: v }));
+  const origine = [f.adresse, f.code_postal].filter((x) => x.trim()).join(", ");
+
+  async function chercher() {
+    setErreur("");
+    if (!f.prenom.trim() || !f.nom.trim()) return setErreur("Écrivez le prénom et le nom.");
+    if (!origine) return setErreur("Écrivez l'adresse ou le code postal.");
+    if (!placePar) return setErreur("Choisissez votre nom dans « Placé par ».");
+    try { localStorage.setItem("placePar", placePar); } catch (e) {}
+    setOccupe(true);
+    try {
+      setDoublons(await verifierDoublonsComplet(f.prenom, f.nom, f.telephone));
+      const fsa = plFsa(origine);
+      let base = bethels.filter((b) => b.address && b.status !== "inactive" && chaine[b.bethel_id]);
+      const meme = base.filter((b) => fsa && plFsa(b.address).slice(0, 2) === fsa.slice(0, 2));
+      if (meme.length >= 3) base = meme;
+      const res = await Promise.all(base.map(async (b) => {
+        try { return { b, minutes: await getDrivingMinutes(origine, b.address) }; } catch (e) { return { b, minutes: null }; }
+      }));
+      const tri = res.filter((r) => r.minutes != null).sort((a, b) => a.minutes - b.minutes).slice(0, 3);
+      if (!tri.length) throw new Error("Aucun Bethel trouvé près de cette adresse. Vérifiez l'adresse.");
+      setProches(tri.map(({ b, minutes }) => {
+        const c = chaine[b.bethel_id] || {};
+        const membres = nbMembres ? nbMembres[b.bethel_id] || 0 : null;
+        return { bethel: b, minutes, n_bethel: c.n_bethel || b.hp_number, leader: c.leader || b.leader_name, tel: c.l_tel || "",
+          overseer: c.overseer, ministre: c.ministre, membres, complet: membres != null && membres >= 12,
+          trajet: `https://www.google.com/maps/dir/${encodeURIComponent(origine)}/${encodeURIComponent(b.address)}` };
+      }));
+      setEtape(2);
+    } catch (e) { setErreur(e.message); } finally { setOccupe(false); }
+  }
+
+  async function confirmer() {
+    setOccupe(true); setErreur("");
+    try {
+      const ch = await chaineSupervisionDuBethel(choix.bethel.bethel_id);
+      const [m] = await supaPost("members", {
+        first_name: f.prenom.trim(), last_name: f.nom.trim(), phone: f.telephone.trim() || null, email: f.courriel.trim() || null,
+        address: f.adresse.trim() || null, postal_code: f.code_postal.trim().toUpperCase() || null, role: "Membre",
+        willing_to_host: false, bethel_id: choix.bethel.bethel_id, status: "active", ...ch,
+      });
+      const [p] = await supaPost("placements", {
+        prenom: f.prenom.trim(), nom: f.nom.trim(), telephone: f.telephone.trim() || null, courriel: f.courriel.trim() || null,
+        adresse: f.adresse.trim() || null, code_postal: f.code_postal.trim().toUpperCase() || null,
+        bethel_id: choix.bethel.bethel_id, n_bethel: choix.n_bethel, leader: choix.leader, leader_tel: choix.tel || null,
+        minutes: choix.minutes, place_par: placePar, member_id: m ? m.member_id : null,
+      });
+      setFait(p); setEtape(4); chargerSuivis(); if (onChanged) onChanged();
+    } catch (e) { setErreur(e.message); } finally { setOccupe(false); }
+  }
+
+  async function cocher(p, champ) {
+    const v = !p[champ];
+    setSuivis((l) => l.map((x) => (x.id === p.id ? { ...x, [champ]: v } : x)));
+    try { await supaPatch("placements", `id=eq.${p.id}`, { [champ]: v }); } catch (e) { chargerSuivis(); }
+  }
+
+  function recommencer() { setF(VIDE); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
+
+  const prenomLeader = choix ? String(choix.leader || "").split(" ")[0] : "";
+  const mLeader = choix ? `Bénédictions ${prenomLeader} 🙏\n\nNous avons la joie de vous confier ${f.prenom} ${f.nom}, qui habite tout près de votre Bethel.\n📞 ${f.telephone || "numéro à venir"}\n\nMerci de l'appeler dans les 48 heures, de lui donner l'adresse du Bethel et de l'accueillir avec l'amour de Christ.\n\nAvec amour,\nToute l'équipe du Ministère Bethel 💙` : "";
+  const mMembre = choix ? `Bénédictions ${f.prenom} 🙏\n\nNous sommes heureux de vous accueillir dans la famille du Tabernacle de Gloire. Votre Bethel, tout près de chez vous, est celui de ${choix.leader} : il se réunit le dimanche à 8 h.\n\n${prenomLeader} vous contactera très bientôt${choix.tel ? ", et vous pouvez aussi l'appeler au " + choix.tel : ""}.\n\nAvec amour,\nToute l'équipe du Ministère Bethel 💙` : "";
+  async function marquerMessage() { if (fait && !fait.message_envoye) { try { await supaPatch("placements", `id=eq.${fait.id}`, { message_envoye: true }); setFait({ ...fait, message_envoye: true }); chargerSuivis(); } catch (e) {} } }
+
+  const champ = (k, label, ph) => (
+    <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", color: "var(--ink-muted)", flex: "1 1 200px", minWidth: 0 }}>
+      {label}<input value={f[k]} placeholder={ph || ""} onChange={(e) => set(k, e.target.value)} style={cmInput} />
+    </label>
+  );
+  const guide = (n, titre, texte) => (
+    <div style={{ background: "rgba(184,134,59,0.12)", borderLeft: "4px solid var(--gold)", padding: "10px 14px", borderRadius: "8px", margin: "12px 0", fontSize: "13.5px", lineHeight: 1.5 }}>
+      <b>Étape {n} sur 4 : {titre}</b><br />{texte}
+    </div>
+  );
+  const btn = (txt, onClick, couleur, dis) => (
+    <button onClick={onClick} disabled={dis} style={{ padding: "11px 16px", border: 0, borderRadius: "8px", background: couleur || "var(--plum)", color: "#fff", fontWeight: 700, fontSize: "14px", cursor: dis ? "default" : "pointer", opacity: dis ? 0.6 : 1 }}>{txt}</button>
+  );
+
+  return (
+    <div style={{ maxWidth: "760px" }}>
+      <h1 style={{ fontFamily: "var(--font-display)", fontSize: "28px", margin: "0 0 4px" }}>Placement d'un membre</h1>
+      <p style={{ color: "var(--ink-muted)", fontSize: "13.5px", margin: 0, fontStyle: "italic" }}>« Dieu donne une famille à ceux qui étaient abandonnés. » Psaume 68.7</p>
+      <div style={{ display: "flex", gap: "6px", margin: "14px 0 0" }}>
+        {[1, 2, 3, 4].map((i) => <span key={i} style={{ flex: 1, height: "6px", borderRadius: "3px", background: i <= etape ? "var(--gold)" : "var(--border)" }} />)}
+      </div>
+
+      {etape === 1 && (<>
+        {guide(1, "qui accueillons-nous ?", "Écrivez les coordonnées de la personne. L'adresse complète donne le Bethel le plus juste.")}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "10px" }}>
+          {champ("prenom", "Prénom *")}{champ("nom", "Nom *")}
+          {champ("telephone", "Téléphone", "514-000-0000")}{champ("courriel", "Courriel (pour lui envoyer son Bethel)", "nom@exemple.com")}
+          {champ("adresse", "Adresse (rue, ville)", "3267 rue Fleury Est, Montréal")}{champ("code_postal", "Code postal", "H1H 2R4")}
+          <label style={{ display: "flex", flexDirection: "column", gap: "4px", fontSize: "12px", color: "var(--ink-muted)", flex: "1 1 200px" }}>
+            Placé par *
+            <select value={placePar} onChange={(e) => setPlacePar(e.target.value)} style={cmInput}>
+              <option value=""></option>{EQUIPE_INTEGRATION.map((n) => <option key={n}>{n}</option>)}
+            </select>
+          </label>
+        </div>
+        <div style={{ marginTop: "14px" }}>{btn(occupe ? "Recherche en cours…" : "Trouver les Bethels les plus proches", chercher, null, occupe)}</div>
+      </>)}
+
+      {etape === 2 && (<>
+        {guide(2, "choisissez le Bethel.", "Le premier est le plus proche en voiture. Regardez aussi les places et le trajet.")}
+        {doublons.length > 0 && <div style={{ background: "rgba(160,60,50,0.1)", padding: "10px 14px", borderRadius: "8px", fontSize: "13px", marginBottom: "10px" }}>⚠️ {doublons.join(" ")} Vérifiez avant de placer cette personne une deuxième fois.</div>}
+        <div style={{ display: "grid", gap: "10px" }}>
+          {proches.map((p, i) => (
+            <div key={p.bethel.bethel_id} style={{ border: i === 0 ? "2px solid var(--gold)" : "1px solid var(--border)", borderRadius: "10px", padding: "14px", background: "var(--surface)" }}>
+              {i === 0 && <div style={{ fontSize: "11.5px", color: "var(--gold)", fontWeight: 700 }}>⭐ LE PLUS PROCHE</div>}
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "18px", fontWeight: 700 }}>{p.leader}</div>
+              <div style={{ fontSize: "12px", color: "var(--ink-muted)", fontFamily: "var(--font-mono)" }}>{p.n_bethel}</div>
+              <div style={{ fontSize: "13px", marginTop: "6px" }}>🚗 {p.minutes} min · Overseer : {p.overseer || "–"} · Ministre : {p.ministre || "–"}</div>
+              {p.membres != null && <div style={{ fontSize: "13px", marginTop: "4px" }}>{p.membres} membre(s) sur 12{p.complet ? " · complet" : ""}
+                <div style={{ height: "6px", background: "var(--border)", borderRadius: "3px", marginTop: "4px", overflow: "hidden" }}><div style={{ height: "100%", width: `${Math.min(100, p.membres / 12 * 100)}%`, background: "var(--teal)" }} /></div></div>}
+              <div style={{ fontSize: "13px", marginTop: "6px" }}><a href={p.trajet} target="_blank" rel="noreferrer">Voir le trajet</a>{p.tel ? ` · 📞 ${p.tel}` : ""}</div>
+              {!p.complet && <div style={{ marginTop: "10px" }}>{btn("Choisir ce Bethel", () => { setChoix(p); setEtape(3); }, i === 0 ? "var(--gold)" : null)}</div>}
+            </div>
+          ))}
+        </div>
+        <div style={{ marginTop: "12px" }}>{btn("← Modifier les coordonnées", () => setEtape(1), "var(--ink-muted)")}</div>
+      </>)}
+
+      {etape === 3 && choix && (<>
+        {guide(3, "confirmer.", "La personne sera ajoutée aux membres du Bethel dans l'app, puis inscrite dans son bloc de Saison_25.")}
+        <div style={{ border: "2px solid var(--gold)", borderRadius: "10px", padding: "14px", background: "var(--surface)", fontSize: "14px", lineHeight: 1.6 }}>
+          <div style={{ fontFamily: "var(--font-display)", fontSize: "18px", fontWeight: 700 }}>{f.prenom} {f.nom}</div>
+          <div>→ Bethel de <b>{choix.leader}</b> ({choix.n_bethel}) · {choix.minutes} min</div>
+          <div style={{ color: "var(--ink-muted)", fontSize: "13px" }}>Placé par : {placePar}</div>
+        </div>
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>
+          {btn(occupe ? "Inscription en cours…" : "✓ Confirmer le placement", confirmer, "var(--gold)", occupe)}
+          {btn("← Choisir un autre Bethel", () => setEtape(2), "var(--ink-muted)")}
+        </div>
+      </>)}
+
+      {etape === 4 && choix && (<>
+        {guide(4, "faire le lien.", "Envoyez ces deux messages. Le premier au leader, le second à la personne accueillie.")}
+        <div style={{ background: "rgba(31,92,78,0.12)", padding: "10px 14px", borderRadius: "8px", fontSize: "13.5px", lineHeight: 1.5 }}>
+          ✓ {f.prenom} {f.nom} est membre du Bethel de {choix.leader}.<br />
+          {f.courriel ? "📧 Les courriels de bienvenue (à la personne et au leader) partent automatiquement depuis Saison_25 dans les 10 minutes." : "📧 Pas de courriel pour la personne : envoyez-lui le WhatsApp."}
+        </div>
+        {[["Message au leader", mLeader, choix.tel], ["Message à la personne accueillie", mMembre, f.telephone]].map(([t, m, tel]) => (
+          <div key={t} style={{ marginTop: "12px" }}>
+            <div style={{ fontSize: "12px", color: "var(--ink-muted)", marginBottom: "4px" }}>{t}</div>
+            <textarea readOnly value={m} rows={8} style={{ ...cmInput, width: "100%", boxSizing: "border-box", resize: "vertical" }} />
+            <div style={{ display: "flex", gap: "8px", marginTop: "6px", flexWrap: "wrap" }}>
+              {btn("Copier", () => { navigator.clipboard && navigator.clipboard.writeText(m).catch(() => {}); marquerMessage(); }, "var(--ink-muted)")}
+              <a href={plWa(tel, m)} target="_blank" rel="noreferrer" onClick={marquerMessage}>{btn("WhatsApp", () => {}, "var(--teal)")}</a>
+            </div>
+          </div>
+        ))}
+        <div style={{ marginTop: "14px" }}>{btn("+ Placer une autre personne", recommencer, "var(--gold)")}</div>
+      </>)}
+
+      {erreur && <div style={{ marginTop: "12px", color: "var(--brick)", fontSize: "13.5px" }}>{erreur}</div>}
+
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "34px 0 4px" }}>Suivi des placements (60 derniers jours)</h2>
+      <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 10px" }}>Personne ne tombe entre deux chaises : cochez chaque étape. Les lignes ⏰ demandent une action.</p>
+      <div style={{ overflowX: "auto", border: "1px solid var(--border)", borderRadius: "10px", background: "var(--surface)" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
+          <thead><tr style={{ textAlign: "left", color: "var(--ink-muted)", fontSize: "11.5px", textTransform: "uppercase" }}>
+            {["Personne", "Bethel", "Message", "Leader a appelé", "Présent(e)", "Suivi"].map((h) => <th key={h} style={{ padding: "9px 10px", borderBottom: "1px solid var(--border)", whiteSpace: "nowrap" }}>{h}</th>)}
+          </tr></thead>
+          <tbody>
+            {suivis.map((p) => { const s = plSuivi(p); return (
+              <tr key={p.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                <td style={{ padding: "8px 10px" }}><b>{p.prenom} {p.nom}</b><div style={{ fontSize: "11.5px", color: "var(--ink-muted)" }}>{new Date(p.created_at).toLocaleDateString("fr-CA")} · {p.place_par || "–"}</div></td>
+                <td style={{ padding: "8px 10px", fontSize: "12px" }}>{p.leader}<div style={{ color: "var(--ink-muted)" }}>{p.n_bethel}</div></td>
+                {["message_envoye", "leader_a_appele", "present"].map((c) => <td key={c} style={{ padding: "8px 10px", textAlign: "center" }}><input type="checkbox" checked={!!p[c]} onChange={() => cocher(p, c)} /></td>)}
+                <td style={{ padding: "8px 10px", color: s.c, fontWeight: 600, fontSize: "12.5px" }}>{s.t}</td>
+              </tr>); })}
+            {suivis.length === 0 && <tr><td colSpan={6} style={{ padding: "12px", color: "var(--ink-muted)" }}>Aucun placement pour le moment.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 const NAV = [
   { id: "dashboard", label: "Tableau de bord", icon: Home },
   { id: "submissions", label: "Soumissions", icon: Inbox },
   { id: "bethels", label: "Bethels", icon: Users },
   { id: "manage-members", label: "Gérer les membres", icon: Plus },
   { id: "search", label: "Recherche membres", icon: Search },
+  { id: "placement", label: "Placement", icon: MapPin },
   { id: "classe-membre", label: "Classe de membre", icon: GraduationCap },
   { id: "devotions", label: "Dévotions", icon: BookOpen },
   { id: "attendance", label: "Présences", icon: Check },
@@ -8331,6 +8563,7 @@ function BethelAdminPortalInner() {
             {view === "bethels" && <BethelsView bethels={bethels} memberCounts={memberCounts} onOpenDetail={setDetailFor} onReload={loadAll} />}
             {view === "manage-members" && <ManageMembersView bethels={bethels} onChanged={loadAll} />}
             {view === "search" && <SearchMembersView bethels={bethels} onOpenBethel={setDetailFor} />}
+            {view === "placement" && <PlacementView bethels={bethels} onChanged={loadAll} />}
             {view === "classe-membre" && <ClasseMembreView />}
             {view === "devotions" && <DevotionsView />}
             {view === "attendance" && <AttendanceView />}
