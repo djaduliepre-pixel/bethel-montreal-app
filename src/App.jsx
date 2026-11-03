@@ -7218,10 +7218,29 @@ async function plDejaPlace(prenom, nom, tel) {
     pl = (await supaGet("placements", `telephone=ilike.*${chiffres.slice(-4)}*&order=created_at.desc&limit=50`))
       .filter((r) => String(r.telephone || "").replace(/\D/g, "").endsWith(chiffres.slice(-10)));
   }
-  pl.forEach((r) => msgs.push(`${r.prenom} ${r.nom} a déjà été placé(e) le ${date(r.created_at)} par ${r.place_par || "l'équipe"} dans le Bethel de ${r.leader} (${r.n_bethel}).`));
+  pl.forEach((r) => msgs.push(`${r.prenom} ${r.nom} a déjà été placé(e) le ${date(r.created_at)} par ${r.place_par || "l'équipe"} dans le Bethel de ${r.leader} (${r.n_bethel})${r.leader_tel ? ` · 📞 leader : ${r.leader_tel}` : ""}.`));
   if (!msgs.length && p.length >= 2 && n.length >= 2) {
-    const m = await supaGet("members", `or=(and(first_name.ilike.${enc(p)},last_name.ilike.${enc(n)}),and(first_name.ilike.${enc(n)},last_name.ilike.${enc(p)}))&status=eq.active&select=first_name,last_name,role&limit=3`);
-    m.forEach((r) => msgs.push(`${r.first_name} ${r.last_name} est déjà membre actif d'un Bethel (${r.role}).`));
+    const m = await supaGet("members", `or=(and(first_name.ilike.${enc(p)},last_name.ilike.${enc(n)}),and(first_name.ilike.${enc(n)},last_name.ilike.${enc(p)}))&status=eq.active&select=first_name,last_name,phone,role,created_at,bethel_id,overseer_name,ordained_minister_name&limit=3`);
+    // Pour pouvoir appeler : le Bethel, son leader et la chaîne de supervision
+    const ids = [...new Set(m.map((r) => r.bethel_id).filter(Boolean))];
+    let sup = [], beth = [];
+    if (ids.length) {
+      try {
+        [sup, beth] = await Promise.all([
+          supaGet("supervision_sheet", `actif=eq.true&bethel_id=in.(${ids.join(",")})&select=bethel_id,n_bethel,leader,l_tel,overseer,ministre`),
+          supaGet("bethels", `bethel_id=in.(${ids.join(",")})&select=bethel_id,hp_number,leader_name`),
+        ]);
+      } catch (e) { /* on affiche ce qu'on a */ }
+    }
+    m.forEach((r) => {
+      const c = sup.find((x) => x.bethel_id === r.bethel_id) || {};
+      const b = beth.find((x) => x.bethel_id === r.bethel_id) || {};
+      const leader = c.leader || b.leader_name;
+      const overseer = c.overseer || r.overseer_name;
+      const ministre = c.ministre || r.ordained_minister_name;
+      msgs.push(`${r.first_name} ${r.last_name}${r.phone ? ` (📞 ${r.phone})` : ""} est déjà membre ${leader ? `du Bethel de ${leader}` : "d'un Bethel"}${c.n_bethel || b.hp_number ? ` (${c.n_bethel || b.hp_number})` : ""} depuis le ${date(r.created_at)}.` +
+        `${c.l_tel ? ` Leader : 📞 ${c.l_tel}.` : ""}${overseer ? ` Overseer : ${overseer}.` : ""}${ministre ? ` Ministre : ${ministre}.` : ""}`);
+    });
   }
   return msgs;
 }
@@ -7405,7 +7424,7 @@ function PlacementView({ bethels, onChanged }) {
           </div>}
           {deja.length > 0 && <div style={{ flex: "1 1 100%", background: "rgba(160,60,50,0.12)", borderLeft: "4px solid var(--brick)", padding: "10px 12px", borderRadius: "8px", fontSize: "13.5px", lineHeight: 1.5 }}>
             ⚠️ <b>Attention, cette personne est peut-être déjà intégrée.</b><br />{deja.map((m, i) => <div key={i}>• {m}</div>)}
-            <div style={{ marginTop: "4px" }}>Merci de vérifier avec la personne qui l'a placée avant de continuer.</div>
+            <div style={{ marginTop: "4px" }}>Appelez d'abord son leader (ou la personne elle-même) pour savoir si elle fréquente encore ce Bethel. Si elle veut changer, continuez ; sinon, rien à faire.</div>
             <label style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", fontSize: "13px" }}>
               <input type="checkbox" checked={pasMeme} onChange={(e) => setPasMeme(e.target.checked)} /> Ce n'est pas la même personne (homonyme)
             </label>
