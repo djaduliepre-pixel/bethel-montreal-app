@@ -7266,6 +7266,9 @@ function PlacementView({ bethels, onChanged }) {
   const [fait, setFait] = useState(null);
   const [chaine, setChaine] = useState({});
   const [suivis, setSuivis] = useState([]);
+  const [aAppeler, setAAppeler] = useState([]);   // personnes notées pour un appel avant placement
+  const [suiviId, setSuiviId] = useState(null);   // la fiche « à appeler » qu'on est en train de placer
+  const [noteOk, setNoteOk] = useState("");
   const [classe, setClasse] = useState(null); // fiche trouvée dans la Classe de membre
   const [deja, setDeja] = useState([]); // déjà placé(e) ? (vérifié dès qu'on écrit le nom ou le téléphone)
   const [pasMeme, setPasMeme] = useState(false);
@@ -7285,7 +7288,7 @@ function PlacementView({ bethels, onChanged }) {
         setClasse(r);
         const msgs = [...d];
         if (r && r.n_bethel && !d.length) msgs.push(`Selon la Classe de membre, ${r.prenom} ${r.nom} est déjà rattaché(e) au ${r.n_bethel}.`);
-        setDeja(msgs); setPasMeme(false);
+        setDeja(msgs); setPasMeme(!!suiviId); // venant de « À appeler » : déjà vérifié par téléphone
         if (r) setF((x) => ({
           ...x,
           courriel: x.courriel || r.courriel || "",
@@ -7303,7 +7306,38 @@ function PlacementView({ bethels, onChanged }) {
       setSuivis(await supaGet("placements", `created_at=gte.${encodeURIComponent(depuis)}&order=created_at.desc&limit=200`));
     } catch (e) { /* facultatif */ }
   }
+  async function chargerAAppeler() {
+    try { setAAppeler(await supaGet("suivi_placement", "statut=in.(%22%C3%80%20appeler%22,%22Appel%C3%A9(e)%22)&order=created_at.asc&limit=300")); } catch (e) { /* facultatif */ }
+  }
+  async function noterPourSuivi() {
+    setErreur(""); setNoteOk("");
+    if (!f.prenom.trim() || !f.nom.trim()) return setErreur("Écrivez le prénom et le nom.");
+    try {
+      await supaPost("suivi_placement", {
+        prenom: f.prenom.trim(), nom: f.nom.trim(), telephone: f.telephone.trim() || null, courriel: f.courriel.trim() || null,
+        adresse: f.adresse.trim() || null, code_postal: f.code_postal.trim().toUpperCase() || null,
+        bethel_actuel: deja.join(" ") || null, note_par: placePar || null,
+      });
+      const nom = `${f.prenom.trim()} ${f.nom.trim()}`;
+      recommencer(); setNoteOk(`📌 ${nom} est notée dans « À appeler avant de placer », plus bas.`); chargerAAppeler();
+    } catch (e) { setErreur(e.message); }
+  }
+  async function majAAppeler(r, champs) {
+    setAAppeler((l) => l.map((x) => (x.id === r.id ? { ...x, ...champs } : x)));
+    try {
+      await supaPatch("suivi_placement", `id=eq.${r.id}`, { ...champs, updated_at: new Date().toISOString(),
+        ...(champs.statut && champs.statut !== "À appeler" && champs.statut !== "Appelé(e)" ? { regle_le: new Date().toISOString() } : {}) });
+      if (champs.statut === "Reste dans son Bethel") chargerAAppeler();
+    } catch (e) { chargerAAppeler(); }
+  }
+  function placerDepuisSuivi(r) {
+    setF({ prenom: r.prenom || "", nom: r.nom || "", telephone: r.telephone || "", courriel: r.courriel || "", adresse: r.adresse || "", code_postal: r.code_postal || "" });
+    setSuiviId(r.id); setProches([]); setChoix(null); setFait(null); setEtape(1); setNoteOk("");
+    setPasMeme(true);
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
   useEffect(() => {
+    chargerAAppeler();
     supaGetTout("supervision_sheet", "actif=eq.true&bethel_id=not.is.null&select=bethel_id,n_bethel,leader,l_tel,overseer,ministre,l_adresse")
       .then((rows) => { const m = {}; rows.forEach((r) => { m[r.bethel_id] = r; }); setChaine(m); }).catch(() => {});
     chargerSuivis();
@@ -7376,6 +7410,7 @@ function PlacementView({ bethels, onChanged }) {
           });
         } catch (e) { /* facultatif */ }
       }
+      if (suiviId) { try { await supaPatch("suivi_placement", `id=eq.${suiviId}`, { statut: "Placé(e)", regle_le: new Date().toISOString(), updated_at: new Date().toISOString(), note: `Placé(e) chez ${choix.leader} (${choix.n_bethel})` }); } catch (e) {} setSuiviId(null); chargerAAppeler(); }
       setFait(p); setEtape(4); chargerSuivis(); if (onChanged) onChanged();
     } catch (e) { setErreur(e.message); } finally { setOccupe(false); }
   }
@@ -7386,7 +7421,7 @@ function PlacementView({ bethels, onChanged }) {
     try { await supaPatch("placements", `id=eq.${p.id}`, { [champ]: v }); } catch (e) { chargerSuivis(); }
   }
 
-  function recommencer() { setF(VIDE); setClasse(null); setDeja([]); setPasMeme(false); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
+  function recommencer() { setSuiviId(null); setF(VIDE); setClasse(null); setDeja([]); setPasMeme(false); setProches([]); setChoix(null); setDoublons([]); setFait(null); setErreur(""); setEtape(1); }
 
   const prenomLeader = choix ? String(choix.leader || "").split(" ")[0] : "";
   const mLeader = choix ? `Bénédictions ${prenomLeader} 🙏\n\nNous avons la joie de vous confier ${f.prenom} ${f.nom}, qui habite tout près de votre Bethel.\n📞 ${f.telephone || "numéro à venir"}\n\nMerci de l'appeler dans les 48 heures, de lui donner l'adresse du Bethel et de l'accueillir avec l'amour de Christ.\n\nAvec amour,\nToute l'équipe du Ministère Bethel 💙` : "";
@@ -7425,9 +7460,12 @@ function PlacementView({ bethels, onChanged }) {
           {deja.length > 0 && <div style={{ flex: "1 1 100%", background: "rgba(160,60,50,0.12)", borderLeft: "4px solid var(--brick)", padding: "10px 12px", borderRadius: "8px", fontSize: "13.5px", lineHeight: 1.5 }}>
             ⚠️ <b>Attention, cette personne est peut-être déjà intégrée.</b><br />{deja.map((m, i) => <div key={i}>• {m}</div>)}
             <div style={{ marginTop: "4px" }}>Appelez d'abord son leader (ou la personne elle-même) pour savoir si elle fréquente encore ce Bethel. Si elle veut changer, continuez ; sinon, rien à faire.</div>
-            <label style={{ display: "flex", alignItems: "center", gap: "6px", marginTop: "6px", fontSize: "13px" }}>
-              <input type="checkbox" checked={pasMeme} onChange={(e) => setPasMeme(e.target.checked)} /> Ce n'est pas la même personne (homonyme)
-            </label>
+            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap", marginTop: "8px" }}>
+              <button onClick={noterPourSuivi} style={{ padding: "8px 12px", border: 0, borderRadius: "8px", background: "var(--gold)", color: "#fff", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>📌 Noter pour suivi (à appeler)</button>
+              <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "13px" }}>
+                <input type="checkbox" checked={pasMeme} onChange={(e) => setPasMeme(e.target.checked)} /> Continuer quand même (homonyme, ou elle veut changer de Bethel)
+              </label>
+            </div>
           </div>}
           {champ("telephone", "Téléphone", "514-000-0000")}{champ("courriel", "Courriel (rempli tout seul s'il est dans la Classe de membre)", "nom@exemple.com")}
           {champ("adresse", "Adresse (rue, ville)", "3267 rue Fleury Est, Montréal")}{champ("code_postal", "Code postal", "H1H 2R4")}
@@ -7494,6 +7532,33 @@ function PlacementView({ bethels, onChanged }) {
       </>)}
 
       {erreur && <div style={{ marginTop: "12px", color: "var(--brick)", fontSize: "13.5px" }}>{erreur}</div>}
+
+      {noteOk && <div style={{ marginTop: "12px", background: "rgba(31,92,78,0.12)", padding: "10px 14px", borderRadius: "8px", fontSize: "13.5px" }}>{noteOk}</div>}
+
+      <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "34px 0 4px" }}>À appeler avant de placer ({aAppeler.length})</h2>
+      <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 10px" }}>Personnes notées pour un appel (déjà inscrites ailleurs, information à vérifier). Appelez, notez ce qui a été dit, puis placez ou laissez dans son Bethel.</p>
+      {aAppeler.length === 0 ? <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginBottom: "6px" }}>Personne à appeler pour le moment.</div> : (
+        <div style={{ display: "grid", gap: "10px" }}>
+          {aAppeler.map((r) => (
+            <div key={r.id} style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", background: "var(--surface)", fontSize: "13px", lineHeight: 1.5 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "8px", flexWrap: "wrap" }}>
+                <div><b style={{ fontSize: "14.5px" }}>{r.prenom} {r.nom}</b>{r.telephone ? ` · 📞 ${r.telephone}` : ""}</div>
+                <div style={{ color: "var(--ink-muted)", fontSize: "12px" }}>Noté le {new Date(r.created_at).toLocaleDateString("fr-CA", { day: "numeric", month: "short" })}{r.note_par ? ` par ${r.note_par}` : ""}</div>
+              </div>
+              {r.bethel_actuel && <div style={{ color: "var(--ink-muted)", marginTop: "4px" }}>{r.bethel_actuel}</div>}
+              <input defaultValue={r.note || ""} placeholder="Ce qui a été dit à l'appel (ex. a déménagé, veut un Bethel près de chez elle)"
+                onBlur={(e) => { if (e.target.value !== (r.note || "")) majAAppeler(r, { note: e.target.value }); }}
+                style={{ ...cmInput, width: "100%", boxSizing: "border-box", marginTop: "8px" }} />
+              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px", alignItems: "center" }}>
+                <select value={r.statut} onChange={(e) => majAAppeler(r, { statut: e.target.value })} style={{ ...cmInput, width: "auto" }}>
+                  <option>À appeler</option><option>Appelé(e)</option><option>Reste dans son Bethel</option>
+                </select>
+                <button onClick={() => placerDepuisSuivi(r)} style={{ padding: "8px 12px", border: 0, borderRadius: "8px", background: "var(--plum)", color: "#fff", fontWeight: 700, fontSize: "13px", cursor: "pointer" }}>Placer maintenant →</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: "34px 0 4px" }}>Suivi des placements (60 derniers jours)</h2>
       <p style={{ color: "var(--ink-muted)", fontSize: "13px", margin: "0 0 10px" }}>Personne ne tombe entre deux chaises : cochez chaque étape. Les lignes ⏰ demandent une action.</p>
