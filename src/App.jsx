@@ -7314,7 +7314,12 @@ function PlacementView({ bethels, onChanged }) {
       const meme = base.filter((b) => { const z = plFsa(adresseDe(b)); return !fsa || !z || z.slice(0, 2) === fsa.slice(0, 2); });
       if (meme.length >= 3) base = meme;
       const res = await Promise.all(base.map(async (b) => {
-        try { return { b, minutes: await getDrivingMinutes(origine, adresseDe(b)) }; } catch (e) { return { b, minutes: null }; }
+        try { return { b, minutes: await getDrivingMinutes(origine, adresseDe(b)) }; } catch (e) {
+          // Adresse mal écrite (ex. « boulevards gouin ouest ») : on réessaie avec le code postal complet du Bethel.
+          const cp = (String(adresseDe(b)).toUpperCase().match(/[A-Z]\d[A-Z]\s?\d[A-Z]\d/) || [""])[0];
+          if (cp) { try { return { b, minutes: await getDrivingMinutes(origine, cp.replace(/^(...)\s?/, "$1 ") + ", Canada") }; } catch (e2) {} }
+          return { b, minutes: null };
+        }
       }));
       const tri = res.filter((r) => r.minutes != null).sort((a, b) => a.minutes - b.minutes).slice(0, 3);
       if (!tri.length) throw new Error("Aucun Bethel trouvé près de cette adresse. Vérifiez l'adresse.");
