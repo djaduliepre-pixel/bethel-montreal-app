@@ -7210,6 +7210,7 @@ async function plDejaPlace(prenom, nom, tel) {
   const enc = (x) => encodeURIComponent(x.replace(/[(),*]/g, " ").trim());
   const msgs = [];
   const date = (d) => new Date(d).toLocaleDateString("fr-CA", { day: "numeric", month: "long", year: "numeric" });
+  const norm = (t) => String(t || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/\s+/g, " ").trim();
   let pl = [];
   if (p.length >= 2 && n.length >= 2) {
     pl = await supaGet("placements", `or=(and(prenom.ilike.${enc(p)},nom.ilike.${enc(n)}),and(prenom.ilike.${enc(n)},nom.ilike.${enc(p)}))&order=created_at.desc&limit=5`);
@@ -7223,13 +7224,16 @@ async function plDejaPlace(prenom, nom, tel) {
     const m = await supaGet("members", `or=(and(first_name.ilike.${enc(p)},last_name.ilike.${enc(n)}),and(first_name.ilike.${enc(n)},last_name.ilike.${enc(p)}))&status=eq.active&select=first_name,last_name,phone,role,created_at,bethel_id,overseer_name,ordained_minister_name&limit=3`);
     // Pour pouvoir appeler : le Bethel, son leader et la chaîne de supervision
     const ids = [...new Set(m.map((r) => r.bethel_id).filter(Boolean))];
-    let sup = [], beth = [];
+    let sup = [], beth = [], blocs = [];
     if (ids.length) {
       try {
         [sup, beth] = await Promise.all([
           supaGet("supervision_sheet", `actif=eq.true&bethel_id=in.(${ids.join(",")})&select=bethel_id,n_bethel,leader,l_tel,overseer,ministre`),
           supaGet("bethels", `bethel_id=in.(${ids.join(",")})&select=bethel_id,hp_number,leader_name`),
         ]);
+        // Groupe (onglet) de Saison 25 et membres déjà inscrits dans le bloc
+        const nums = [...new Set(sup.map((x) => x.n_bethel).filter(Boolean))];
+        if (nums.length) blocs = await supaGet("saison25_blocs", `n_bethel=in.(${nums.map((x) => `"${encodeURIComponent(x)}"`).join(",")})&select=n_bethel,onglet,membres`);
       } catch (e) { /* on affiche ce qu'on a */ }
     }
     m.forEach((r) => {
@@ -7239,7 +7243,13 @@ async function plDejaPlace(prenom, nom, tel) {
       const overseer = c.overseer || r.overseer_name;
       const ministre = c.ministre || r.ordained_minister_name;
       msgs.push(`${r.first_name} ${r.last_name}${r.phone ? ` (📞 ${r.phone})` : ""} est déjà membre ${leader ? `du Bethel de ${leader}` : "d'un Bethel"}${c.n_bethel || b.hp_number ? ` (${c.n_bethel || b.hp_number})` : ""} depuis le ${date(r.created_at)}.` +
-        `${c.l_tel ? ` Leader : 📞 ${c.l_tel}.` : ""}${overseer ? ` Overseer : ${overseer}.` : ""}${ministre ? ` Ministre : ${ministre}.` : ""}`);
+        `${c.l_tel ? ` Leader : 📞 ${c.l_tel}.` : ""}${overseer ? ` Overseer : ${overseer}.` : ""}${ministre ? ` Ministre : ${ministre}.` : ""}` +
+        (() => {
+          const bl = blocs.find((x) => x.n_bethel === c.n_bethel);
+          if (!bl) return "";
+          const dedans = (bl.membres || []).some((x) => norm(`${x.prenom} ${x.nom}`) === norm(`${r.first_name} ${r.last_name}`));
+          return ` Saison 25 : onglet ${bl.onglet}, bloc ${bl.n_bethel} — ${dedans ? "✅ déjà inscrit(e) dans le bloc." : "❌ pas encore inscrit(e) dans le bloc."}`;
+        })());
     });
   }
   return msgs;
