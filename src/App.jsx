@@ -7359,9 +7359,9 @@ function PersonDevotionModal({ membre, onClose }) {
         const motsCible = new Set(cible.split(/\s+/).filter((w) => w.length > 1));
         const prenomMot = motsCible.values().next().value || membre.first_name;
 
-        const large = await supaGet(
+        const large = await supaGetTout(
           "devotions",
-          `submitter_name=ilike.*${encodeURIComponent(membre.last_name)}*&select=devotion_date,submitter_name,raw_snippet&order=devotion_date.desc`
+          `submitter_name=ilike.*${encodeURIComponent(membre.last_name)}*&select=devotion_date,submitter_name&order=devotion_date.desc,devotion_id.asc`
         );
         const filtre = large.filter((d) => {
           const mots = new Set(normaliseNom(d.submitter_name).split(/\s+/).filter((w) => w.length > 1));
@@ -7379,9 +7379,59 @@ function PersonDevotionModal({ membre, onClose }) {
     })();
   }, [membre]);
 
-  const premiereDate = devotions.length ? devotions[devotions.length - 1].devotion_date : null;
-  const derniereDate = devotions.length ? devotions[0].devotion_date : null;
-  const joursUniques = new Set(devotions.map((d) => d.devotion_date)).size;
+  // Un seul jour compté une fois (les doublons sont regroupés)
+  const joursListe = [...new Set(devotions.map((d) => d.devotion_date))].sort(); // croissant
+  const premiereDate = joursListe.length ? joursListe[0] : null;
+  const derniereDate = joursListe.length ? joursListe[joursListe.length - 1] : null;
+  const joursUniques = joursListe.length;
+  const ensembleJours = new Set(joursListe);
+  const NOMS_MOIS = ["Janvier","Février","Mars","Avril","Mai","Juin","Juillet","Août","Septembre","Octobre","Novembre","Décembre"];
+  const NOMS_JOURS = ["lun.","mar.","mer.","jeu.","ven.","sam.","dim."];
+  // Liste des mois entre la première et la dernière dévotion (du plus récent au plus ancien)
+  const moisListe = [];
+  if (premiereDate && derniereDate) {
+    let [y, m] = premiereDate.split("-").map(Number);
+    const [yf, mf] = derniereDate.split("-").map(Number);
+    while (y < yf || (y === yf && m <= mf)) { moisListe.push([y, m]); m++; if (m > 12) { m = 1; y++; } }
+    moisListe.reverse();
+  }
+  const dateLisible = (iso) => {
+    const [y, m, d] = iso.split("-").map(Number);
+    const j = (new Date(y, m - 1, d).getDay() + 6) % 7; // lundi = 0
+    const ABR = ["janv.","févr.","mars","avr.","mai","juin","juil.","août","sept.","oct.","nov.","déc."];
+    return `${NOMS_JOURS[j]} ${d} ${ABR[m - 1]} ${y}`;
+  };
+  const carteMois = ([y, m]) => {
+    const nbJours = new Date(y, m, 0).getDate();
+    const decalage = (new Date(y, m - 1, 1).getDay() + 6) % 7;
+    const cases = [];
+    for (let i = 0; i < decalage; i++) cases.push(null);
+    for (let d = 1; d <= nbJours; d++) cases.push(d);
+    const fait = (d) => ensembleJours.has(`${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`);
+    const nbFaits = Array.from({ length: nbJours }, (_, i) => i + 1).filter(fait).length;
+    return (
+      <div key={`${y}-${m}`} style={{ marginBottom: "18px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "8px" }}>
+          <span style={{ fontSize: "15px", fontWeight: 700, color: "var(--ink)" }}>{NOMS_MOIS[m - 1]} {y}</span>
+          <span style={{ fontSize: "13px", color: "var(--plum)", fontWeight: 600 }}>{nbFaits} / {nbJours} jours</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(7, 1fr)", gap: "4px" }}>
+          {NOMS_JOURS.map((n) => (
+            <div key={n} style={{ textAlign: "center", fontSize: "11px", color: "var(--ink-muted)" }}>{n}</div>
+          ))}
+          {cases.map((d, i) => d === null ? <div key={i} /> : (
+            <div key={i} style={{
+              textAlign: "center", padding: "7px 0", borderRadius: "8px", fontSize: "13px",
+              fontWeight: fait(d) ? 700 : 400,
+              background: fait(d) ? "var(--teal)" : "transparent",
+              color: fait(d) ? "#fff" : "var(--ink-muted)",
+              border: fait(d) ? "none" : "1px solid var(--border)",
+            }}>{d}</div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   return (
     <div style={{
@@ -7389,62 +7439,46 @@ function PersonDevotionModal({ membre, onClose }) {
       display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: "20px",
     }} onClick={onClose}>
       <div style={{
-        background: "var(--surface)", borderRadius: "14px", width: "440px", maxWidth: "100%",
-        maxHeight: "80vh", display: "flex", flexDirection: "column",
+        background: "var(--surface)", borderRadius: "14px", width: "560px", maxWidth: "100%",
+        maxHeight: "88vh", display: "flex", flexDirection: "column",
         padding: "26px", boxShadow: "0 24px 60px rgba(36,30,24,0.3)",
       }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexShrink: 0 }}>
           <div>
-            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "20px", margin: 0, color: "var(--ink)" }}>
+            <h2 style={{ fontFamily: "var(--font-display)", fontSize: "24px", margin: 0, color: "var(--ink)" }}>
               {membre.first_name} {membre.last_name}
             </h2>
-            <div style={{ fontSize: "12.5px", color: "var(--ink-muted)", marginTop: "3px" }}>{membre.role}</div>
+            <div style={{ fontSize: "14px", color: "var(--ink-muted)", marginTop: "4px" }}>{membre.role}</div>
           </div>
           <button onClick={onClose} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)", padding: "4px" }}>
-            <X size={18} />
+            <X size={22} />
           </button>
         </div>
 
-        {!loading && devotions.length > 0 && (
-          <div style={{ display: "flex", gap: "18px", marginTop: "16px", paddingBottom: "16px", borderBottom: "1px solid var(--border)" }}>
+        {!loading && joursUniques > 0 && (
+          <div style={{ display: "flex", gap: "28px", marginTop: "18px", paddingBottom: "18px", borderBottom: "1px solid var(--border)" }}>
             <div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: "26px", color: "var(--plum)" }}>{joursUniques}</div>
-              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Unique days</div>
-            </div>
-            {joursUniques !== devotions.length && (
-              <div>
-                <div style={{ fontSize: "13px", color: "var(--gold)", fontWeight: 600, marginTop: "6px" }}>{devotions.length} entries</div>
-                <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>({devotions.length - joursUniques} duplicate{devotions.length - joursUniques > 1 ? "s" : ""})</div>
-              </div>
-            )}
-            <div>
-              <div style={{ fontSize: "13px", color: "var(--ink)", fontWeight: 600, marginTop: "6px" }}>{premiereDate}</div>
-              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>First</div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "38px", lineHeight: 1, color: "var(--plum)" }}>{joursUniques}</div>
+              <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px" }}>jours de dévotion</div>
             </div>
             <div>
-              <div style={{ fontSize: "13px", color: "var(--ink)", fontWeight: 600, marginTop: "6px" }}>{derniereDate}</div>
-              <div style={{ fontSize: "11px", color: "var(--ink-muted)", textTransform: "uppercase", letterSpacing: "0.03em" }}>Most recent</div>
+              <div style={{ fontSize: "15px", color: "var(--ink)", fontWeight: 700, marginTop: "6px" }}>{dateLisible(premiereDate)}</div>
+              <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px" }}>première</div>
+            </div>
+            <div>
+              <div style={{ fontSize: "15px", color: "var(--ink)", fontWeight: 700, marginTop: "6px" }}>{dateLisible(derniereDate)}</div>
+              <div style={{ fontSize: "13px", color: "var(--ink-muted)", marginTop: "4px" }}>plus récente</div>
             </div>
           </div>
         )}
 
-        <div style={{ marginTop: "14px", overflowY: "auto", flex: 1 }}>
+        <div style={{ marginTop: "16px", overflowY: "auto", flex: 1 }}>
           {loading ? (
-            <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>Loading…</div>
-          ) : devotions.length === 0 ? (
-            <div style={{ fontSize: "13px", color: "var(--ink-muted)" }}>No devotions found for this person yet.</div>
+            <div style={{ fontSize: "14px", color: "var(--ink-muted)" }}>Chargement…</div>
+          ) : joursUniques === 0 ? (
+            <div style={{ fontSize: "14px", color: "var(--ink-muted)" }}>Aucune dévotion trouvée pour cette personne.</div>
           ) : (
-            devotions.map((d, i) => (
-              <div key={i} style={{
-                display: "flex", flexDirection: "column", padding: "9px 0",
-                borderBottom: i < devotions.length - 1 ? "1px solid var(--border)" : "none",
-              }}>
-                <span style={{ fontSize: "12.5px", fontWeight: 600, color: "var(--ink)" }}>{d.devotion_date}</span>
-                {d.raw_snippet && (
-                  <span style={{ fontSize: "11.5px", color: "var(--ink-muted)", marginTop: "2px" }}>{d.raw_snippet.slice(0, 90)}…</span>
-                )}
-              </div>
-            ))
+            moisListe.map(carteMois)
           )}
         </div>
       </div>
