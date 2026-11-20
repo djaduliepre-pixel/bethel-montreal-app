@@ -7051,7 +7051,11 @@ function analyserTexteWhatsApp(texte, membres = []) {
     // Message de dévotion : mot "dévotion", ou structure typique (Date + Nom/Prénom, Saint-Esprit, passage clé, verset)
     const estDevotion = /d[ée]votion/i.test(corps)
       || (/(^|\n|\*)\s*Date\s*\*?\s*:/i.test(corps) && /(Pr[ée]nom|(?<![A-Za-zÀ-ÿ])Nom)\s*\*?\s*:/i.test(corps))
-      || /saint[\s-]*esprit/i.test(corps) || /passage\s+cl[ée]/i.test(corps) || /\bverset\b/i.test(corps);
+      || /saint[\s-]*esprit/i.test(corps) || /passage\s+cl[ée]/i.test(corps) || /\bverset\b/i.test(corps)
+      // Modèle « Que dit la Parole ? / Que cela signifie ? / Que dois-je faire aujourd'hui ? / Prière »
+      || /que\s+dit\s+la\s+parole/i.test(corps) || /que\s+cela\s+signifie/i.test(corps) || /que\s+dois[-\s]*je\s+faire/i.test(corps)
+      // Référence biblique (ex. « Actes 14:8-10 ») dans un message assez long
+      || (corps.length >= 200 && /(?:^|\n)\s*[1-3]?\s?[A-Za-zÀ-ÿ]{3,}\.?\s+\d{1,3}\s?:\s?\d{1,3}/.test(corps));
     if (!estDevotion || corps.length < 40) continue;
 
     // Champs "Nom :" / "Prénom :" dans n'importe quel ordre, nom en plusieurs mots possible.
