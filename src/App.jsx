@@ -7459,7 +7459,7 @@ function DevotionsView() {
     setLoading(true);
     try {
       const [devs, mems] = await Promise.all([
-        supaGet("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date&limit=5000`),
+        supaGetTout("devotions", `devotion_date=gte.${dateDebut}&devotion_date=lte.${dateFin}&select=submitter_name,devotion_date&order=devotion_date.asc`),
         supaGetTout("members", "status=eq.active&select=member_id,first_name,last_name,role,phone"),
       ]);
       setDevotions(devs);
@@ -7591,6 +7591,24 @@ function DevotionsView() {
         }}>
           This week
         </button>
+        <button onClick={() => {
+          const n = new Date(); const y = n.getFullYear(), m = n.getMonth();
+          setDateDebut(new Date(Date.UTC(y, m, 1)).toISOString().slice(0, 10));
+          setDateFin(new Date(Date.UTC(y, m + 1, 0)).toISOString().slice(0, 10));
+        }} style={{
+          padding: "6px 12px", borderRadius: "6px", border: "1px solid var(--border)", background: "var(--surface)",
+          fontSize: "12px", color: "var(--ink-muted)", cursor: "pointer",
+        }}>
+          This month
+        </button>
+        <label style={{ fontSize: "12.5px", color: "var(--ink-muted)" }}>
+          Month <input type="month" value={dateDebut.slice(0, 7)} onChange={(e) => {
+            const v = e.target.value; if (!v) return;
+            const [y, m] = v.split("-").map(Number);
+            setDateDebut(new Date(Date.UTC(y, m - 1, 1)).toISOString().slice(0, 10));
+            setDateFin(new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10));
+          }} style={{ marginLeft: "6px", padding: "5px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12.5px" }} />
+        </label>
         {[1, 2, 3, 4].map((t) => (
           <button key={t} onClick={() => {
             const { debut, fin } = datesDuTrimestre(t, anneeFiscaleCourante());
