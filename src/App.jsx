@@ -7253,18 +7253,24 @@ function ImportDevotionsPanel({ onImported, membres = [] }) {
         setBusy(false);
         return;
       }
-      // Vérifie les doublons déjà présents (même nom + même date)
-      const dates = [...new Set(trouvees.map((t) => t.devotion_date))];
-      const existantes = await supaGet(
+      // Vérifie les doublons déjà présents (même personne + même date).
+      // On lit TOUTES les lignes de la période (par pages de 1000) : avant, seules les 1000 premières
+      // étaient lues, ce qui laissait passer des doublons quand on collait un gros export.
+      const dates = trouvees.map((t) => t.devotion_date).sort();
+      const dMin = dates[0];
+      const dMax = dates[dates.length - 1];
+      const existantes = await supaGetTout(
         "devotions",
-        `devotion_date=in.(${dates.join(",")})&select=submitter_name,devotion_date`
+        `devotion_date=gte.${dMin}&devotion_date=lte.${dMax}&select=submitter_name,devotion_date&order=devotion_id.asc`
       );
-      const dejaVues = new Set(existantes.map((e) => `${normaliseNom(e.submitter_name)}|${e.devotion_date}`));
+      // Clé indépendante de l'ordre des mots (« Jean Paul » = « Paul Jean »), accents et majuscules ignorés
+      const clePersonne = (nom) => normaliseNom(nom).split(/\s+/).filter(Boolean).sort().join(" ");
+      const dejaVues = new Set(existantes.map((e) => `${clePersonne(e.submitter_name)}|${e.devotion_date}`));
 
       // Écarte aussi les doublons à l'intérieur du texte collé (même personne + même date)
       const vuesDansLot = new Set();
       const aInserer = trouvees.filter((t) => {
-        const cle = `${normaliseNom(t.submitter_name)}|${t.devotion_date}`;
+        const cle = `${clePersonne(t.submitter_name)}|${t.devotion_date}`;
         if (dejaVues.has(cle) || vuesDansLot.has(cle)) return false;
         vuesDansLot.add(cle);
         return true;
