@@ -7039,6 +7039,19 @@ function analyserTexteWhatsApp(texte, membres = []) {
   while ((m = regex.exec(texte)) !== null) {
     positions.push({ index: m.index, fin: regex.lastIndex, date: m[1], expediteur: m[3].trim() });
   }
+  // Texte collé directement depuis WhatsApp, sans « [date heure] Nom : » : un message par ligne « Dévotion … » (sinon tout le texte = 1 message)
+  if (positions.length === 0 && texte.trim()) {
+    const auj = dateIso(new Date());
+    const debuts = [];
+    const reDebut = /(?:^|\n)[\s\u2060\u200e•*]*d[ée]votion\b[^\n]*\d{4}/gi;
+    let mm;
+    while ((mm = reDebut.exec(texte)) !== null) debuts.push(mm.index);
+    if (debuts.length === 0) debuts.push(0);
+    if (debuts[0] > 0 && texte.slice(0, debuts[0]).trim().length > 40) debuts.unshift(0);
+    debuts.forEach((d, i) => {
+      positions.push({ index: d, fin: d, date: auj, expediteur: "" });
+    });
+  }
   const membresIdx = membres.map((mb) => {
     const nomComplet = `${mb.first_name || ""} ${mb.last_name || ""}`.trim();
     return { nomComplet, mots: [...new Set(normaliseNom(nomComplet).split(/\s+/).filter((w) => w.length > 1))] };
@@ -7047,7 +7060,7 @@ function analyserTexteWhatsApp(texte, membres = []) {
     const debut = positions[i].fin;
     const fin = i + 1 < positions.length ? positions[i + 1].index : texte.length;
     // Les emojis et caractères invisibles sont remplacés par un espace (ils collent parfois aux mots)
-    const corps = texte.slice(debut, fin).replace(/[\p{Extended_Pictographic}\uFE0F\u200d\u200e\u200f\u20e3]/gu, " ").trim();
+    const corps = texte.slice(debut, fin).replace(/[\p{Extended_Pictographic}\uFE0F\u200d\u200e\u200f\u2060\u20e3]/gu, " ").trim();
     // Message de dévotion : mot "dévotion", ou structure typique (Date + Nom/Prénom, Saint-Esprit, passage clé, verset)
     const estDevotion = /d[ée]votion/i.test(corps)
       || (/(^|\n|\*)\s*Date\s*\*?\s*:/i.test(corps) && /(Pr[ée]nom|(?<![A-Za-zÀ-ÿ])Nom)\s*\*?\s*:/i.test(corps))
