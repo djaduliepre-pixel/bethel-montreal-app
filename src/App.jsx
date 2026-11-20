@@ -7350,6 +7350,143 @@ function ImportDevotionsPanel({ onImported, membres = [] }) {
   );
 }
 
+// ─── Export vers le Google Sheet (SUIVI) ───────────────────────────────────────
+// Construit un tableau de « T » (une ligne par nom de ton SUIVI, une colonne par jour)
+// à coller dans le Sheet. Le 1er janvier 2026 = colonne K.
+function lettreColonne(n) { // n = numéro de colonne (A=1)
+  let s = "";
+  while (n > 0) { const r = (n - 1) % 26; s = String.fromCharCode(65 + r) + s; n = Math.floor((n - 1) / 26); }
+  return s;
+}
+function jourDeLAnnee(iso) { // 1er janvier 2026 = 0
+  const [y, m, d] = iso.split("-").map(Number);
+  return Math.round((Date.UTC(y, m - 1, d) - Date.UTC(2026, 0, 1)) / 86400000);
+}
+function construireTableauSheet(nomsSheet, devotions, dateDebut, dateFin) {
+  const mots = (n) => new Set(normaliseNom(n).split(/\s+/).filter((w) => w.length > 1));
+  const idx = nomsSheet.map((n) => mots(n));
+  const egaux = (a, b) => a.size === b.size && [...a].every((w) => b.has(w));
+  const inclus = (p, g) => p.size >= 2 && [...p].every((w) => g.has(w));
+  const cacheNoms = new Map(); // nom de la base -> { i } | { ambigu } | { absent }
+  const trouver = (nomBase) => {
+    if (cacheNoms.has(nomBase)) return cacheNoms.get(nomBase);
+    const mb = mots(nomBase);
+    let cand = [];
+    idx.forEach((ms, i) => { if (ms.size && egaux(ms, mb)) cand.push(i); });
+    if (cand.length === 0) idx.forEach((ms, i) => { if (ms.size && (inclus(ms, mb) || inclus(mb, ms))) cand.push(i); });
+    const res = cand.length === 1 ? { i: cand[0] } : cand.length > 1 ? { ambigu: cand } : { absent: true };
+    cacheNoms.set(nomBase, res);
+    return res;
+  };
+  const j0 = jourDeLAnnee(dateDebut), j1 = jourDeLAnnee(dateFin);
+  const nbJours = j1 - j0 + 1;
+  const grille = nomsSheet.map(() => new Array(Math.max(nbJours, 0)).fill(""));
+  const ambigus = new Map(), absents = new Map();
+  let nbT = 0;
+  for (const d of devotions) {
+    if (d.devotion_date < dateDebut || d.devotion_date > dateFin) continue;
+    const r = trouver(d.submitter_name);
+    if (r.i !== undefined) {
+      const j = jourDeLAnnee(d.devotion_date) - j0;
+      if (j >= 0 && j < nbJours && grille[r.i][j] !== "T") { grille[r.i][j] = "T"; nbT++; }
+    } else if (r.ambigu) ambigus.set(d.submitter_name, r.ambigu.map((i) => nomsSheet[i].trim()));
+    else absents.set(d.submitter_name, (absents.get(d.submitter_name) || 0) + 1);
+  }
+  return {
+    tsv: grille.map((l) => l.join("\t")).join("\n"),
+    nbT, nbJours, colonneDepart: lettreColonne(11 + j0), colonneFin: lettreColonne(11 + j1),
+    ambigus: [...ambigus.entries()], absents: [...absents.entries()],
+  };
+}
+
+function ExportSheetPanel() {
+  const [open, setOpen] = useState(false);
+  const lire = (k, def) => { try { return localStorage.getItem(k) || def; } catch { return def; } };
+  const [noms, setNoms] = useState(() => lire("bethel_suivi_noms", ""));
+  const [debut, setDebut] = useState(() => { const d = new Date(); d.setDate(d.getDate() - 13); return dateIso(d); });
+  const [fin, setFin] = useState(() => dateIso(new Date()));
+  const [busy, setBusy] = useState(false);
+  const [res, setRes] = useState(null);
+  const [erreur, setErreur] = useState("");
+
+  async function generer() {
+    setBusy(true); setErreur(""); setRes(null);
+    try {
+      try { localStorage.setItem("bethel_suivi_noms", noms); } catch { /* ignore */ }
+      const liste = noms.split(/\r?\n/);
+      while (liste.length && !liste[liste.length - 1].trim()) liste.pop();
+      if (!liste.length) throw new Error("Colle d'abord la colonne des noms de SUIVI.");
+      if (debut > fin) throw new Error("La date de début est après la date de fin.");
+      const devs = await supaGetTout("devotions", `devotion_date=gte.${debut}&devotion_date=lte.${fin}&select=submitter_name,devotion_date&order=devotion_id.asc`);
+      const out = construireTableauSheet(liste, devs, debut, fin);
+      let copie = false;
+      try { await navigator.clipboard.writeText(out.tsv); copie = true; } catch { /* le texte reste affiché */ }
+      setRes({ ...out, copie, nbNoms: liste.length });
+    } catch (e) { setErreur(e.message); }
+    finally { setBusy(false); }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={() => setOpen(true)} style={{
+        display: "flex", alignItems: "center", gap: "6px", padding: "8px 14px", borderRadius: "8px",
+        border: "1px solid var(--teal)", background: "transparent", color: "var(--teal)", fontSize: "13px",
+        fontWeight: 600, cursor: "pointer",
+      }}>
+        <Plus size={14} /> Copier pour le Sheet
+      </button>
+    );
+  }
+  const champ = { padding: "7px 9px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "13px" };
+  return (
+    <div style={{ border: "1px solid var(--border)", borderRadius: "10px", padding: "18px", background: "var(--surface)", marginBottom: "18px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+        <span style={{ fontSize: "14px", fontWeight: 700, color: "var(--ink)" }}>Copier pour le Sheet (SUIVI)</span>
+        <button onClick={() => setOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "var(--ink-muted)" }}><X size={16} /></button>
+      </div>
+      <p style={{ fontSize: "13px", color: "var(--ink-muted)", margin: "0 0 10px", lineHeight: 1.5 }}>
+        1) Dans SUIVI, copie la colonne des noms (de A7 jusqu'au dernier nom) et colle-la ci-dessous. Elle est gardée pour la prochaine fois.<br />
+        2) Choisis les dates, puis clique « Préparer ». Le tableau de « T » est copié.<br />
+        3) Dans SUIVI, clique sur la case <b>ligne 7</b> de la colonne indiquée, puis colle.
+      </p>
+      <textarea value={noms} onChange={(e) => setNoms(e.target.value)} placeholder="Noms de SUIVI (un par ligne)…"
+        style={{ width: "100%", boxSizing: "border-box", minHeight: "90px", padding: "10px", border: "1px solid var(--border)", borderRadius: "8px", fontSize: "12px", fontFamily: "var(--font-mono)", resize: "vertical" }} />
+      <div style={{ display: "flex", gap: "10px", marginTop: "10px", alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ fontSize: "13px" }}>Du <input type="date" value={debut} onChange={(e) => setDebut(e.target.value)} style={champ} /></label>
+        <label style={{ fontSize: "13px" }}>au <input type="date" value={fin} onChange={(e) => setFin(e.target.value)} style={champ} /></label>
+        <button disabled={busy} onClick={generer} style={{ padding: "8px 16px", borderRadius: "8px", border: "none", background: "var(--teal)", color: "#fff", fontSize: "13px", fontWeight: 600, cursor: busy ? "wait" : "pointer" }}>
+          {busy ? "Préparation…" : "Préparer"}
+        </button>
+      </div>
+      <div style={{ fontSize: "12px", color: "var(--gold)", marginTop: "8px" }}>
+        ⚠️ Le collage remplace les cases de cette période. Choisis seulement les jours à mettre à jour (par exemple les 14 derniers jours).
+      </div>
+      {erreur && <div style={{ fontSize: "13px", color: "var(--brick)", marginTop: "10px" }}>⚠️ {erreur}</div>}
+      {res && (
+        <div style={{ marginTop: "12px", fontSize: "13px", color: "var(--ink)", lineHeight: 1.6 }}>
+          <div style={{ color: "var(--teal)", fontWeight: 600 }}>
+            ✓ {res.nbT} « T » sur {res.nbNoms} noms, {res.nbJours} jours. {res.copie ? "Copié dans le presse-papiers." : "Copie impossible : sélectionne le texte ci-dessous et copie-le."}
+          </div>
+          <div>Colle dans SUIVI à partir de la case <b>{res.colonneDepart}7</b> (jusqu'à la colonne {res.colonneFin}).</div>
+          {res.absents.length > 0 && (
+            <details style={{ marginTop: "6px" }}>
+              <summary style={{ cursor: "pointer" }}>{res.absents.length} noms de l'app absents de SUIVI (à ajouter ?)</summary>
+              <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>{res.absents.map(([n, c]) => `${n} (${c})`).join(" · ")}</div>
+            </details>
+          )}
+          {res.ambigus.length > 0 && (
+            <details style={{ marginTop: "6px" }} open>
+              <summary style={{ cursor: "pointer", color: "var(--brick)" }}>{res.ambigus.length} noms ambigus, non comptés : plusieurs lignes possibles</summary>
+              <div style={{ fontSize: "12px", color: "var(--ink-muted)" }}>{res.ambigus.map(([n, l]) => `${n} → ${l.join(" / ")}`).join(" · ")}</div>
+            </details>
+          )}
+          {!res.copie && <textarea readOnly value={res.tsv} style={{ width: "100%", boxSizing: "border-box", minHeight: "80px", marginTop: "8px", fontSize: "11px", fontFamily: "var(--font-mono)" }} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PersonDevotionModal({ membre, onClose }) {
   const [devotions, setDevotions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -7617,6 +7754,7 @@ function DevotionsView() {
 
       <div style={{ display: "flex", gap: "8px", marginBottom: "18px" }}>
         <ImportDevotionsPanel onImported={recharger} membres={members} />
+        <ExportSheetPanel />
         <AddDevotionManualPanel onAdded={recharger} />
       </div>
 
